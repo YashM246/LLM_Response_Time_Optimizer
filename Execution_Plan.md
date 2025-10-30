@@ -32,10 +32,39 @@
 - ML benchmarking and evaluation
 
 ### Hardware Requirements
-- **GPU**: NVIDIA GPU with 12GB+ VRAM (for Mistral-7B inference)
-  - Alternative: Use smaller model (e.g., Mistral-7B quantized) or cloud GPU (Colab, Lambda Labs)
-- **RAM**: 32GB+ recommended
+
+**Local Development Machine:**
+- **GPU**: NVIDIA GPU with 8GB+ VRAM (RTX 4070 or equivalent)
+  - Use 4-bit/8-bit quantization to fit models in 8GB
+- **RAM**: 16GB+ recommended
 - **Storage**: 50GB+ free space (for model weights, datasets)
+
+**Cloud Resources (for final benchmarking):**
+- **Google Colab Pro** (recommended): T4/V100 GPU with 16GB VRAM
+  - Free tier works but may timeout on long benchmarks
+- **University HPC** (alternative): Submit as batch job for extended runs
+- **Purpose**: Run full Mistral-7B FP16 and comprehensive 1000-sample benchmarks
+
+### Development Strategy
+
+**Two-Tier Approach:**
+
+1. **Local Development (Days 1-16)**
+   - Use 4-bit quantized models (fits in 8GB VRAM)
+   - Quick iteration with 10-100 samples
+   - Code, debug, and validate optimizations
+   - Fast feedback loop (minutes, not hours)
+
+2. **Cloud Benchmarking (Days 17-19)**
+   - Full Mistral-7B FP16 on Colab GPU/TPU
+   - Complete 1000-sample Alpaca evaluation
+   - Publication-quality results
+   - Run overnight, analyze next day
+
+**Why this works:**
+- ✅ Fast local development (no cloud costs during dev)
+- ✅ Professional-grade final results (full model, large dataset)
+- ✅ Best of both worlds (speed + quality)
 
 ---
 
@@ -683,22 +712,68 @@ def benchmark_latency(model_fn, prompts, num_runs=50):  # Reduced from 100
 
 **Claude's Role**: Provide working benchmark template (80% complete).
 
-#### Task 5.2: Run Benchmarks (REDUCED SCOPE)
-**Your Action**: Run benchmarks on smaller dataset
+#### Task 5.2: Run Benchmarks (TWO-STAGE APPROACH)
+
+**Stage 1: Local Development Benchmarks (Day 16)**
+**Your Action**: Quick validation with small sample on local machine
 
 ```bash
-# REDUCED: 100-200 samples instead of 1000
+# Quick validation on 4-bit quantized model (local machine)
 python -m src.benchmarking \
-    --num-samples 100 \  # Reduced for speed
-    --output benchmarks/results/final_results.json
+    --num-samples 100 \
+    --model-type quantized \
+    --output benchmarks/results/dev_results.json
 ```
 
-**Validation Checkpoint**:
-- [ ] 100-200 samples evaluated (enough for proof)
-- [ ] Key metrics collected
-- [ ] Results show improvement
+**Purpose**: Validate your code works, see preliminary results
 
-**Claude's Role**: Help debug runtime issues, ensure results look reasonable.
+---
+
+**Stage 2: Final Colab Benchmarks (Day 17 - OVERNIGHT RUN)**
+**Your Action**: Create `notebooks/06_colab_final_benchmark.ipynb`
+
+This notebook will:
+1. Load full Mistral-7B FP16 (no quantization for baseline)
+2. Load your optimized JAX model
+3. Run on **1000 Alpaca samples** (takes 2-4 hours)
+4. Save comprehensive results
+
+```python
+# In Colab notebook (with T4/V100 GPU)
+# Set to use full dataset
+NUM_SAMPLES = 1000  # Full Alpaca evaluation
+
+# Run both models
+pytorch_results = benchmark_pytorch(model_pt, alpaca_dataset, NUM_SAMPLES)
+jax_results = benchmark_jax(model_jax, alpaca_dataset, NUM_SAMPLES)
+
+# Save results
+save_results("pytorch_baseline_full.json", pytorch_results)
+save_results("jax_optimized_full.json", jax_results)
+```
+
+**Strategy:**
+- Start the Colab run in the evening (Day 17)
+- Let it run overnight (~3-4 hours)
+- Download results next morning (Day 18)
+- No time wasted waiting!
+
+**Colab Setup Tips:**
+- Use Colab Pro if available (no timeouts)
+- Or split into batches if using free tier
+- Mount Google Drive to save results automatically
+- Use TPU for JAX model (even faster!)
+
+**Validation Checkpoint**:
+- [ ] Local 100-sample benchmark works (Day 16)
+- [ ] Colab notebook created and tested (Day 17)
+- [ ] Full 1000-sample results obtained (Day 18 morning)
+- [ ] Results show 2-3x speedup, 4x memory reduction
+
+**Claude's Role**:
+- Provide Colab notebook template with GPU/TPU setup
+- Help debug any Colab-specific issues
+- Guide on how to download and analyze results
 
 #### Task 5.3: Create Visualizations
 **Your Action**: Create `notebooks/05_results_visualization.ipynb`
@@ -954,13 +1029,14 @@ Add:
 
 ### **Week 3: Benchmarking + Polish**
 **Days 15-17**: Comprehensive evaluation (Phase 5)
-- Build benchmark suite (Day 15)
-- Run full benchmarks on Alpaca dataset (Day 16)
-- Create visualizations (Day 17)
+- Build benchmark suite with configurable sample size (Day 15)
+- Local validation: 100-sample benchmark on laptop (Day 16)
+- **Colab setup: Launch 1000-sample overnight run** (Day 17 evening)
 
-**Days 18-19**: Documentation + Demo
-- Final demo notebook (Day 18)
-- Update README with results (Day 19)
+**Days 18-19**: Analysis + Documentation
+- Download Colab results, create visualizations (Day 18 morning)
+- Final demo notebook with impressive results (Day 18 afternoon)
+- Update README with actual metrics (Day 19)
 - Polish and prepare for presentation
 
 **Days 20-21**: BUFFER for issues/refinements
@@ -1009,7 +1085,7 @@ Good luck on your learning journey! 🚀
 | **Conversion** | Manual implementation | Use HF auto-conversion |
 | **Quantization** | Full calibration | Weight-only (simpler) |
 | **Testing** | Comprehensive | Essential only |
-| **Dataset Size** | 1000 samples | 100-200 samples |
+| **Dataset Size** | 1000 samples | 100 dev + 1000 final (Colab) |
 | **Claude's Role** | Reviewer/guide | Active contributor |
 | **Daily Time** | 1-2 hours | 3-4 hours required |
 
@@ -1024,6 +1100,40 @@ Good luck on your learning journey! 🚀
 5. **Use cloud GPU**: Don't wait for local setup issues
 6. **Skip perfection**: Working > perfect for first iteration
 7. **Leverage templates**: Claude provides more scaffolding here
+8. **Overnight runs**: Use Colab for long benchmarks while you sleep
+
+---
+
+## Benchmarking Strategy Summary
+
+### **Development Phase (Days 1-16): Local + Small Samples**
+- **Hardware**: Your RTX 4070 (8GB VRAM) + 4-bit quantization
+- **Dataset**: 10-100 samples for quick iteration
+- **Purpose**: Fast development, debugging, validation
+- **Time per run**: 5-10 minutes
+- **Cost**: $0 (local machine)
+
+### **Final Evaluation (Day 17-18): Colab + Full Dataset**
+- **Hardware**: Colab T4/V100 GPU (16GB VRAM) or TPU
+- **Dataset**: Full 1000 Alpaca samples
+- **Purpose**: Publication-quality results for portfolio
+- **Time**: 3-4 hours (overnight run)
+- **Cost**: Free (Colab free tier) or $10/month (Colab Pro - recommended)
+
+### **Why This Works**
+✅ Fast local iteration (don't wait hours for results during dev)
+✅ Professional-grade final metrics (1000 samples, full model)
+✅ Cost-effective (only use Colab when needed)
+✅ Timeline-friendly (overnight run doesn't block your work)
+✅ Best results (can use TPU for JAX, which is faster than GPU!)
+
+### **Colab TPU Advantage for JAX**
+JAX models can run on Colab TPU (not available locally):
+- **GPU**: Good performance (~20-30 tokens/sec)
+- **TPU**: Excellent performance (~40-60 tokens/sec) - JAX is optimized for TPU!
+- This makes your final JAX results even more impressive
+
+**Final deliverable**: Side-by-side comparison showing massive speedup on real hardware with comprehensive 1000-sample evaluation!
 
 ---
 
