@@ -70,7 +70,38 @@ def convert_pytorch_to_jax(pytorch_state_dict:Dict[str, torch.Tensor])->Dict[str
     # Returns:
     #           jax_state_dict: Flat Dictionary of JAX arrays with renamed keys
 
-    pass
+    jax_state_dict = {}
+
+    for name, param in pytorch_state_dict.items():
+        
+        # First convert tensor to JAX array
+        numpy_param = param.cpu().numpy()
+        jax_param = jnp.array(numpy_param)
+
+        # Check if transposition is required
+        # Need to transpose 2D weights that are not embeddings
+        is_2d_wt = name.endswith('.weight') and param.ndim==2
+        is_embed = 'embed' in name or "wte" in name or "wpe" in name
+
+        if is_2d_wt and not is_embed:
+            # This will be a linear layer - Need to transpose
+            jax_param = jax_param.T         # [out,in] = [in,out]
+            print(f"  ✓ Transposed {name}: {param.shape} → {jax_param.shape}")
+
+        # Rename the parameter
+        new_name = name
+        if is_embed:
+            # Embeddings: .weight -> .embedding
+            new_name = name.replace('.weight', '.embedding')
+        elif name.endswith('.weight'):
+            # Linear layers: .weight -> .kernel
+            new_name = name.replace('.weight', '.kernel')
+        
+        # Otherwise, keep the name
+        jax_state_dict[new_name] = jax_param
+
+    print(f"\n✓ Converted {len(jax_state_dict)} parameters to JAX")
+    return jax_state_dict
 
 def build_flax_pytree(jax_state_dict: Dict[str, jnp.ndarray])-> Dict[str, Any]:
     # Convert flat JAX state_dict to nested Flax PyTree structure
