@@ -1,1 +1,53 @@
-venv
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Model files (large)
+*.bin
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+checkpoints/
+models/
+*.msgpack
+
+# Data
+data/
+*.csv
+*.json
+*.parquet
+
+# Results
+benchmarks/results/*.json
+benchmarks/results/plots/*.png
+benchmarks/results/plots/*.pdf
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local

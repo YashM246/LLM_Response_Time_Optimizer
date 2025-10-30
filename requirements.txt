@@ -1,0 +1,23 @@
+# Core frameworks (Python 3.13 compatible - using latest versions)
+jax[cuda12]  # Will install latest compatible version
+flax
+transformers
+torch
+accelerate
+
+# Optimization & evaluation
+datasets
+rouge-score
+evaluate
+
+# Utilities
+numpy>=1.26.0  # Python 3.13 requires numpy >= 1.26
+matplotlib
+seaborn
+jupyter
+pytest
+pyyaml
+
+# Development
+black
+isort
