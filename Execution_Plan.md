@@ -49,22 +49,31 @@
 
 **Two-Tier Approach:**
 
-1. **Local Development (Days 1-16)**
-   - Use 4-bit quantized models (fits in 8GB VRAM)
-   - Quick iteration with 10-100 samples
-   - Code, debug, and validate optimizations
-   - Fast feedback loop (minutes, not hours)
+#### **Tier 1: Local Development (Days 1-16)**
+- **Conversion (Days 3-5)**: Use GPT-2 (124M params, fits in 16GB RAM)
+  - Learn transposition logic, PyTree structure
+  - Fast iteration without VRAM/cloud dependencies
+- **Optimization (Days 8-16)**: Use 4-bit quantized Mistral (if needed)
+  - Quick iteration with 10-100 samples
+  - Code, debug, and validate optimizations
+  - Fast feedback loop (minutes, not hours)
 
-2. **Cloud Benchmarking (Days 17-19)**
-   - Full Mistral-7B FP16 on Colab GPU/TPU
-   - Complete 1000-sample Alpaca evaluation
-   - Publication-quality results
-   - Run overnight, analyze next day
+#### **Tier 2: Cloud Integration (Days 6, 17-19)**
+- **Day 6 (Conversion)**: Run Mistral conversion on Colab
+  - Apply GPT-2 conversion logic to full Mistral-7B
+  - Save converted params, download for local use
+- **Days 17-19 (Benchmarking)**: Final evaluation on Colab
+  - Full Mistral-7B FP16 on GPU/TPU
+  - Complete 1000-sample Alpaca evaluation
+  - Publication-quality results
+  - Run overnight, analyze next day
 
 **Why this works:**
+- ✅ Learn deeply with small model (GPT-2) locally
+- ✅ Same code scales to large model (Mistral) on cloud
 - ✅ Fast local development (no cloud costs during dev)
 - ✅ Professional-grade final results (full model, large dataset)
-- ✅ Best of both worlds (speed + quality)
+- ✅ Best of both worlds (learning depth + production quality)
 
 ---
 
@@ -241,52 +250,121 @@ import time
 
 **Claude's Role**: Help debug model loading issues, suggest memory profiling tools.
 
-#### Task 2.2: Use Existing Flax Implementation (SHORTCUT)
-**Your Action**: **USE Hugging Face's FlaxMistral directly**
-1. Load pre-converted Flax Mistral from Hugging Face Hub (if available)
-2. OR use HF's built-in PyTorch→Flax conversion utility
-3. Understand the architecture by running it, not studying source deeply
+#### Task 2.2: Manual Conversion Implementation (LEARNING PATH)
+**Your Action**: **Manually convert PyTorch weights to JAX/Flax**
 
-**SKIP**: Manual architecture study, diagram drawing
-**Shortcut**: HF likely has `FlaxMistralForCausalLM` ready to use!
+**Strategy**: Two-tier development approach for learning + efficiency
+1. **Local (Days 3-5)**: Develop conversion logic using GPT-2 (124M params, fits in 16GB RAM)
+2. **Colab (Day 6)**: Apply same logic to Mistral-7B (requires 16GB VRAM)
 
-**Claude's Role**: Help you find and use existing Flax implementations quickly.
+**Why This Approach:**
+- ✅ Learn the actual conversion process (weight transposition, PyTree structure)
+- ✅ Fast iteration locally without VRAM limitations
+- ✅ Same code works for both models (architecture-agnostic)
+- ✅ Deep understanding of PyTorch ↔ JAX differences
 
-#### Task 2.3: Load/Convert Model (FAST PATH)
-**Your Action**: Create `src/model_conversion.py`
+**Phase A: Develop with GPT-2 Locally (Days 3-5)**
 
-**FAST APPROACH**: Use HF's conversion OR load pre-converted model:
+Create `src/model_conversion.py` with these functions:
+
+**Function 1: `load_pytorch_model()`** (Day 3)
 ```python
-from transformers import FlaxMistralForCausalLM, MistralConfig
+def load_pytorch_model(model_name: str, use_small_model: bool = False):
+    """
+    Load PyTorch model and extract state_dict.
 
-def load_or_convert_model(model_name: str = "mistralai/Mistral-7B-v0.1"):
-    """Load Flax Mistral model (use HF's built-in conversion)"""
-    try:
-        # Try loading pre-converted Flax model
-        model = FlaxMistralForCausalLM.from_pretrained(
-            model_name,
-            from_pt=True  # Auto-convert from PyTorch if needed
-        )
-        return model
-    except Exception as e:
-        # Claude will help debug if this fails
-        raise
+    Args:
+        model_name: HuggingFace model identifier
+        use_small_model: If True, use GPT-2 for local testing
 
-def save_flax_params(model, save_path: str):
-    """Save Flax parameters"""
-    model.save_pretrained(save_path)
+    Returns:
+        state_dict: Dictionary of PyTorch tensors
+        tokenizer: Loaded tokenizer
+    """
+    # Load GPT-2 for local development, Mistral for Colab
+    # Extract state_dict (flat dictionary)
+    # YOU IMPLEMENT
+    pass
 ```
 
-**ONLY IF NEEDED**: Implement manual conversion (Claude provides template)
+**Function 2: `convert_pytorch_to_jax()`** (Days 3-4)
+```python
+def convert_pytorch_to_jax(pytorch_state_dict: Dict[str, torch.Tensor]) -> Dict[str, jnp.ndarray]:
+    """
+    Convert PyTorch state_dict to JAX arrays.
 
-**Validation Checkpoint**:
-- [ ] Model loads successfully
-- [ ] Parameters are in Flax format
-- [ ] Can run inference
+    Operations:
+    1. torch.Tensor → numpy → jax.Array
+    2. Transpose linear layer weights: [out, in] → [in, out]
+    3. Rename: .weight → .kernel, embed_tokens.weight → .embedding
 
-**Claude's Role**: Provide full conversion code if HF auto-conversion fails.
+    YOU IMPLEMENT THIS - CORE LEARNING TASK
+    """
+    pass
+```
 
-#### Task 2.4: Numerical Validation
+**Function 3: `build_flax_pytree()`** (Day 4-5)
+```python
+def build_flax_pytree(jax_state_dict: Dict[str, jnp.ndarray]) -> Dict[str, Any]:
+    """
+    Convert flat JAX state_dict to nested Flax PyTree structure.
+
+    Example:
+    Flat: {'model.layers.0.self_attn.q_proj.kernel': array(...)}
+    Nested: {'model': {'layers': {'0': {'self_attn': {'q_proj': {'kernel': array(...)}}}}}}
+
+    YOU IMPLEMENT THIS
+    """
+    pass
+```
+
+**Function 4: `load_flax_model_with_params()`** (Day 5)
+```python
+def load_flax_model_with_params(params: Dict[str, Any], model_name: str):
+    """
+    Initialize FlaxMistralForCausalLM with converted parameters.
+
+    YOU IMPLEMENT THIS
+    """
+    pass
+```
+
+**Testing Strategy:**
+```bash
+# Test locally with GPT-2
+python tests/test_conversion.py  # Uses GPT-2 by default
+
+# Later on Colab with Mistral
+python tests/test_conversion.py --use-mistral  # Full model
+```
+
+**Phase B: Run on Mistral in Colab (Day 6)**
+
+Once your conversion code works with GPT-2:
+1. Create `notebooks/conversion_colab.ipynb`
+2. Upload your `src/model_conversion.py`
+3. Run conversion with `use_small_model=False`
+4. Save converted Mistral JAX params to Google Drive
+5. Download for local use in Phase 3-4
+
+**Validation Checkpoint (Phase A - Local)**:
+- [ ] `load_pytorch_model()` loads GPT-2 successfully
+- [ ] `convert_pytorch_to_jax()` transposes weights correctly
+- [ ] `build_flax_pytree()` creates nested structure
+- [ ] Can initialize Flax model with converted weights
+
+**Validation Checkpoint (Phase B - Colab)**:
+- [ ] Same code works with Mistral-7B on Colab
+- [ ] Converted Mistral params saved to Drive
+- [ ] Can load converted model locally
+
+**Claude's Role**:
+- Explain weight transposition logic
+- Guide PyTree structure building
+- Debug conversion issues
+- Provide code structure/templates (you implement core logic)
+
+#### Task 2.3: Numerical Validation
 **Your Action**: Create `tests/test_conversion.py`
 
 Implement tests:
@@ -993,15 +1071,17 @@ Add:
 - Environment setup and structure creation (2 hours)
 - Basic JAX operations and JIT understanding (2 hours)
 
-**Days 3-5**: Model conversion start (Phase 2 begins)
-- Baseline PyTorch benchmarking (Day 3)
-- Study Flax Mistral architecture - USE EXISTING HF implementation (Day 4)
-- Start parameter conversion (Day 5)
+**Days 3-5**: Model conversion development with GPT-2 (Phase 2 begins)
+- Baseline PyTorch benchmarking + load_pytorch_model() (Day 3)
+- Implement convert_pytorch_to_jax() - weight transposition logic (Day 4)
+- Implement build_flax_pytree() + load_flax_model_with_params() (Day 5)
+- Test all functions locally with GPT-2
 
-**Days 6-7**: Complete conversion + validation
-- Finish parameter conversion
-- Numerical validation tests
-- Basic JAX inference working
+**Days 6-7**: Mistral conversion on Colab + validation
+- Run conversion on Mistral-7B in Colab (Day 6 morning)
+- Save and download converted Mistral params (Day 6 afternoon)
+- Numerical validation tests (Day 7)
+- Basic JAX inference with Mistral working (Day 7)
 
 **Checkpoint Week 1**: JAX model running, outputs match PyTorch
 
@@ -1082,11 +1162,11 @@ Good luck on your learning journey! 🚀
 |--------|--------------|-----------------|
 | **Timeline** | 7-8 weeks | 2-3 weeks |
 | **JAX Learning** | Deep dive (1 week) | Crash course (2 days) |
-| **Conversion** | Manual implementation | Use HF auto-conversion |
+| **Conversion** | Manual implementation | Manual (GPT-2 locally → Mistral on Colab) |
 | **Quantization** | Full calibration | Weight-only (simpler) |
 | **Testing** | Comprehensive | Essential only |
 | **Dataset Size** | 1000 samples | 100 dev + 1000 final (Colab) |
-| **Claude's Role** | Reviewer/guide | Active contributor |
+| **Claude's Role** | Reviewer/guide | Active contributor + explainer |
 | **Daily Time** | 1-2 hours | 3-4 hours required |
 
 ---

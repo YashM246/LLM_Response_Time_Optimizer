@@ -21,15 +21,42 @@ from transformers import (
 from typing import Dict, Any
 import numpy as np
 
-def load_pytorch_model(model_name:str="mistralai/Mistral-7B-Instruct-v0.2"):
+def load_pytorch_model(model_name:str="mistralai/Mistral-7B-Instruct-v0.2", use_small_model:bool=False):
     # Load PyTorch Mistral model and extract state_dict
     # Args:
     #           model_name: HuggingFace Model Identifier
+    #           use_small_model: If True, use a tiny model for local testing
     # Returns:
     #           pytorch_state_dict: Dictionary of PyTorch Tensors
     #           tokenizer: Loaded tokenizer
-    
-    pass
+
+    if use_small_model:
+        print("⚠️ Using GPT-2 for local testing (structure similar to Mistral)")
+        test_model_name = "gpt2"
+        tokenizer = AutoTokenizer.from_pretrained(test_model_name)
+        model = AutoModelForCausalLM.from_pretrained(
+            test_model_name,
+            torch_dtype=torch.float16,
+            device_map="cpu"
+        )
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            torch_dtype=torch.float16,
+            device_map='cpu',
+            low_cpu_mem_usage=True
+            )
+        
+    state_dict = model.state_dict()
+
+    # Inspect structure of state_dict
+    # print(f"Loaded {len(state_dict)} parameters")
+    # print("Example keys:")
+    # for i, key in enumerate(list(state_dict.keys())[:5]):
+    #     print(f"  {key}: {state_dict[key].shape}")
+
+    return state_dict, tokenizer
 
 def convert_pytorch_to_jax(pytorch_state_dict:Dict[str, torch.Tensor])->Dict[str, jnp.ndarray]:
     # Convert PyTorch state_dict to JAX Arrays
