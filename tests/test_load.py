@@ -49,3 +49,51 @@ if __name__ == "__main__":
     print(f"  JAX params: {len(jax_state_dict)}")
     print(f"  Tokenizer vocab size: {len(tokenizer)}")
     print("=" * 60)
+
+    # Step 4: Build PyTree
+    print("\n[Step 4] Building Flax PyTree structure...")
+    from src.model_conversion import build_flax_pytree
+    pytree = build_flax_pytree(jax_state_dict)
+    
+    # Step 5: Verify PyTree structure
+    print("\n[Step 5] Verifying PyTree structure...")
+    print("=" * 60)
+    
+    # Check top-level structure
+    print(f"✓ Top-level keys: {list(pytree.keys())}")
+    
+    # Navigate to specific parameters
+    if 'transformer' in pytree:
+        print(f"✓ Transformer components: {list(pytree['transformer'].keys())}")
+        
+        # Check layer structure
+        if 'h' in pytree['transformer']:
+            print(f"✓ Number of layers: {len(pytree['transformer']['h'])}")
+            
+            # Inspect first layer
+            if '0' in pytree['transformer']['h']:
+                layer_0 = pytree['transformer']['h']['0']
+                print(f"✓ Layer 0 components: {list(layer_0.keys())}")
+                
+                # Check attention structure
+                if 'attn' in layer_0:
+                    attn = layer_0['attn']
+                    print(f"✓ Attention components: {list(attn.keys())}")
+                    
+                    # Check c_attn parameters
+                    if 'c_attn' in attn:
+                        c_attn = attn['c_attn']
+                        print(f"✓ c_attn parameters: {list(c_attn.keys())}")
+                        if 'kernel' in c_attn:
+                            print(f"  - kernel shape: {c_attn['kernel'].shape}")
+                        if 'bias' in c_attn:
+                            print(f"  - bias shape: {c_attn['bias'].shape}")
+        
+        # Check embedding
+        if 'wte' in pytree['transformer']:
+            wte = pytree['transformer']['wte']
+            print(f"✓ Word embedding keys: {list(wte.keys())}")
+            if 'embedding' in wte:
+                print(f"  - embedding shape: {wte['embedding'].shape}")
+    
+    print("=" * 60)

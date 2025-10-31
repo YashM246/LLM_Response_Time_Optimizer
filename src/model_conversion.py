@@ -114,7 +114,27 @@ def build_flax_pytree(jax_state_dict: Dict[str, jnp.ndarray])-> Dict[str, Any]:
     # Returns:
     #           params: Nested PyTree structure
 
-    pass
+    pytree = {}
+
+    for flat_key, value in jax_state_dict.items():
+
+        # Split key into parts
+        # Eg: 'transformer.h.0.attn.c_attn.kernel' → ['transformer', 'h', '0', 'attn', 'c_attn', 'kernel']
+        keys = flat_key.split('.')
+
+        # Navigate through tree, creating nested dicts as needed
+        current = pytree
+        # Process all keys except last
+        for key in keys[:-1]:
+            if key not in current:
+                current[key] = {}   # Create new nested dict
+            current = current[key]  # Move deeper into tree
+
+        # Set final value
+        current[keys[-1]] = value
+    
+    print(f"✓ Built PyTree with {len(jax_state_dict)} parameters")
+    return pytree
 
 def load_flax_model_with_params(params:Dict[str,Any],
                                 model_name:str="mistralai/Mistral-7B-Instruct-v0.2")-> FlaxMistralForCausalLM:
