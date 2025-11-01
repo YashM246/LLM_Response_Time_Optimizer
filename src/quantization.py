@@ -11,6 +11,28 @@ import jax
 import jax.numpy as jnp
 from typing import Dict, Any, Tuple
 
+
+def calculate_size(params: Dict[str, Any])->int:
+    # Calculates total memory size of a parameter PyTree in bytes
+    #
+    # Args:
+    #           params: Flax PyTree with parameters
+    # Returns:
+    #           total_size: Total memory in bytes
+
+    total_size = 0
+    
+    def add_size(leaf):
+        nonlocal total_size
+        if isinstance(leaf, jnp.ndarray):
+            # Calculate num_elements*bytes_per_element
+            total_size += leaf.size * leaf.dtype.itemsize
+    
+    # Traverse tree and sum sizes
+    jax.tree_util.tree.map(add_size, params)
+
+    return total_size
+
 def quantize_weights(weights:jnp.ndarray)-> tuple[jnp.ndarray, float]:
     # Function to convert FP16/FP32 arrays to INT8
     # Takes a floating point array, finds a max absolute value
@@ -112,3 +134,4 @@ def quantize_model_params(params:Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[s
     quantized_params = jax.tree_util.tree_map_with_path(quantize_leaf, params)
 
     return quantized_params, scales
+
