@@ -5,6 +5,13 @@ This module provides functions to:
 1. Quantize FP16/FP32 weights to INT8 (reduce memory)
 2. Dequantize INT8 back to FP32 (for inference)
 3. Quantize entire model parameter PyTrees
+
+TODO: Implement checkpoint saving/loading for quantized models
+- Need to save both quantized_params (INT8 PyTree) AND scales (dict)
+- Save scales as JSON alongside checkpoint
+- Implement load function that reconstructs both
+- Add validation tests for save/load round-trip
+- Consider using pickle for simplicity vs Orbax for compatibility
 """
 
 import jax

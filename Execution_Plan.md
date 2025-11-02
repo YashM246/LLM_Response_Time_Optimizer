@@ -493,8 +493,17 @@ def quantize_model_params(params: dict) -> tuple[dict, dict]:
 ```
 
 **Validation Checkpoint**:
-- [ ] Can quantize/dequantize weights
-- [ ] Model still runs (quality checked later)
+- [x] Can quantize/dequantize weights
+- [x] Model still runs (quality checked later)
+- [x] Tested on GPT-2: 326MB → 163MB (2.00x reduction)
+- [x] Tested on Mistral-7B: 14.48GB → 7.24GB (2.00x reduction)
+
+**TODO - FUTURE WORK**:
+- [ ] Implement checkpoint saving for quantized models
+  - Must save both `quantized_params` AND `scales` dictionary
+  - Save scales as JSON alongside checkpoint
+  - Add validation tests for save/load round-trip
+  - Consider pickle vs Orbax trade-offs
 
 **Claude's Role**: Provide nearly complete code, you adapt for model structure.
 
