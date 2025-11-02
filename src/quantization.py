@@ -29,7 +29,7 @@ def calculate_size(params: Dict[str, Any])->int:
             total_size += leaf.size * leaf.dtype.itemsize
     
     # Traverse tree and sum sizes
-    jax.tree_util.tree.map(add_size, params)
+    jax.tree.map(add_size, params)
 
     return total_size
 
