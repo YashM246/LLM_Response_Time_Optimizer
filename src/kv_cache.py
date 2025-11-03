@@ -65,7 +65,7 @@ def get_cached_kv(cache: Dict[int, Dict[str, jnp.ndarray]],
     # But we might've only filled cache_length positions so far
     # Extract full cache, but return only sliced version uptill filled positions
     
-    full_keys = cache[layer_idx]['keys']
+    full_keys = cache[layer_idx]['key']
     full_values = cache[layer_idx]['value']
 
     # Shape: [batch, num_heads, cache_length, head_dim]
