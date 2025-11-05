@@ -226,6 +226,166 @@ def get_embeddings(input_ids: jnp.ndarray,
     
     return embeddings
 
+def layer_norm(x: jnp.ndarray,
+               gamma: jnp.ndarray,  # Scale Parameter
+               beta: jnp.ndarray,   # Shift Parameter
+               eps:float= 1e-5)-> jnp.ndarray:
+    # Layer Normalization
+    #
+    # Args:
+    #           x: Input [batch, seq_len, hidden_dim]
+    #           gamma: Scale [hidden_dim]
+    #           beta: Bias [hidden_dim]
+    #           eps: Small constant for numerical stability
+    #
+    # Returns:
+    #           normalized: [batch, seq_len, hidden_dim]
+    
+    mean = jnp.mean(x, axis=-1, keepdims=True)
+    variance = jnp.var(x, axis=-1, keepdims=True)
+
+    # Normalize
+    x_norm = (x - mean) / jnp.sqrt(variance + eps)
+
+    # Scale and shift
+    output = gamma * x_norm + beta
+
+    return output
+
+def mlp(x: jnp.ndarray,
+        mlp_params: dict,
+        model_type: str= "gpt2")-> jnp.ndarray:
+    # MLP (feed-forward network) with GeLU activation
+    #
+    # Args:
+    #           x: Input [batch, seq_len, hidden_dim]
+    #           mlp_params: MLP weights (c_fc, c_proj for GPT2)
+    #           model_type: "gpt2" or "mistral"
+    #
+    # Returns:
+    #           output: [batch, seq_len, hidden_dim]
+    # 
+    # Structure for GPT2:
+    #       1) Linear: hidden_dim -> 4*hidden_dim (expansion)
+    #       2) GELu activation
+    #       3) Linear: 4*hidden_dim -> hidden_dim (projection)
+
+    if model_type == "gpt2":
+        # Expansion
+        c_fc_weight = mlp_params['c_fc']['kernel']
+        c_fc_bias = mlp_params['c_fc']['bias']
+
+        hidden = x @ c_fc_weight + c_fc_bias    # [batch, seq, 4*hidden]
+
+        # GeLU
+        hidden = jax.nn.gelu(hidden)
+
+        # Projection
+        c_proj_weight = mlp_params['c_proj']['kernel']
+        c_proj_bias = mlp_params['c_proj']['bias']
+
+        output = hidden @ c_proj_weight + c_proj_bias
+    
+    else:
+        # Mistral uses different naming and SwiGLU
+        raise NotImplementedError("Mistral MLP not yet implemented")
+    
+    return output
+
+def transformer_layer(hidden_states: jnp.ndarray,
+                     layer_params: dict,
+                     cache: dict,
+                     layer_idx: int,
+                     position: int,
+                     num_heads: int,
+                     use_cache: bool = True,
+                     model_type: str = "gpt2")-> Tuple[jnp.ndarray, dict]:
+    # Complete transfomer later with cached attention
+    #
+    # Args:
+    #           hidden_states: Input [batch, seq_len, hidden_dim]
+    #           layer_params: Layer parameter
+    #           cache: KV-cache
+    #           layer_idx: Layer Index
+    #           position: Current position
+    #           num_heads: Number of attention heads
+    #           use_cache: Whether to use cache
+    #           model_type: "gpt2" or "mistral"
+    # 
+    # Returns:
+    #           output: Layer output [batch, seq_len, hidden_dim]
+    #           cache: Updated cache
+
+    if model_type == "gpt2":
+        # 1) Pre Layer Norm for Attention
+        ln_1_gamma = layer_params['ln_1']['scale']
+        ln_1_beta = layer_params['ln_1']['bias']
+        normed = layer_norm(hidden_states, ln_1_gamma, ln_1_beta)
+
+        # 2) Cached Attention
+        attn_weights = layer_params['attn']['c_attn']['kernel']     # [hidden, 3*hidden]
+        attn_output, cache = cached_attention(hidden_states= normed,
+                                              attn_weights= attn_weights,
+                                              num_heads= num_heads,
+                                              cache= cache,
+                                              layer_idx= layer_idx,
+                                              position= position,
+                                              use_cache= use_cache)
+        
+        # 3) Attention output projection
+        c_proj_weight = layer_params['attn']['c_proj']['kernel']
+        c_proj_bias = layer_params['attn']['c_proj']['bias']
+        attn_output = attn_output @ c_proj_weight + c_proj_bias
+
+        # 4) Residual connection
+        hidden_states = hidden_states + attn_output
+
+        # 5) Pre-LayerNorm for MLP
+        ln_2_gamma = layer_params['ln_2']['scale']
+        ln_2_beta = layer_params['ln_2']['bias']
+        normed = layer_norm(hidden_states, ln_2_gamma, ln_2_beta)
+
+        # 6) MLP
+        mlp_output = mlp(normed, layer_params['mlp'], model_type)
+
+        # 7) Residual connection
+        output = hidden_states + mlp_output
+
+    else:
+        raise NotImplementedError("Mistral transformer layer not yet implemented")
+    
+    return output, cache
+
+def lm_head(hidden_states: jnp.ndarray,
+            params: dict,
+            model_type: str= "gpt2")-> jnp.ndarray:
+    # Language Model Head
+    # Project hidden state to vocabulary logits
+    #
+    # Args:
+    #           hidden_states: [batch, seq_len, hidden_dim]
+    #           params: Model_parameters
+    #           model_type: "gpt2" or "mistral"
+    #
+    # Returns:
+    #           logits: [batch, seq_len, vocab_size]
+
+    if model_type=="gpt2":
+        # Final layer norm
+        ln_f_gamma = params['params']['transformer']['ln_f']['scale']
+        ln_f_beta = params['params']['transformer']['ln_f']['bias']
+        hidden_states = layer_norm(hidden_states, ln_f_gamma, ln_f_beta)
+        
+        # Project to vocabulary
+        # GPT-2 ties weights: lm_head uses same weights as token embedding
+        wte = params['params']['transformer']['wte']['embedding']  # [vocab_size, hidden_dim]
+        logits = hidden_states @ wte.T  # [batch, seq_len, vocab_size]
+        
+    else:
+        raise NotImplementedError("Mistral LM head not yet implemented")
+    
+    return logits
+
 def sample_token(logits: jnp.ndarray,
                  temperature: float=1.0,
                  top_k:int=50,
@@ -270,37 +430,14 @@ def sample_token(logits: jnp.ndarray,
     return next_token
 
 
-def forward_pass_single_layer(hidden_states: jnp.ndarray,
-                              layer_params: dict,
-                              cache: dict,
-                              layer_idx: int,
-                              position: int,
-                              num_heads: int,
-                              use_cache: bool=True)-> Tuple[jnp.ndarray, dict]:
-    # Forward Pass through a single transformer layer
-    #
-    # Args:
-    #           hidden_states: Input [batch, 1, hidden_dim]
-    #           layer_params: Parameters for this layer
-    #           cache: KV-cache
-    #           layer_idx: Layer Index
-    #           position: Current Position
-    #           num_heads: Number of attention heads
-    #           use_cache: Whether to use cache
-    #
-    # Returns:
-    #           output: Layer output [batch, 1, hidden_dim]
-    #           cache: Updated cache
-    pass
-
-
 def generate_text_with_cache(params: dict,
                              tokenizer,
                              prompt: str,
                              max_new_tokens: int=50,
                              temperature: float=1.0,
+                             top_k: int= 50,
                              use_cache: bool= True,
-                             model_config: dict= None) -> Tuple[str, dict]:
+                             model_type: str= "gpt2") -> Tuple[str, dict]:
     # Generate text using cached attention
     #
     # Args:
@@ -309,8 +446,9 @@ def generate_text_with_cache(params: dict,
     #           prompt: Input prompt string
     #           max_new_tokens: Number of tokens to generate
     #           temperature: Sampling temperature
+    #           top_k: Top K Sampling
     #           use_cache: Whether to use KV-Cache
-    #           model_config: Model configuration (num_layers, num_heads, etc)
+    #           model_type: "gpt2" or "mistral"
     #
     # Returns:
     #           generated_text: Full generated string
@@ -327,62 +465,139 @@ def generate_text_with_cache(params: dict,
 
     import time
     from src.kv_cache import initialize_cache
-
-    # Extract config
-    if model_config is None:
-        # Default GPT2 config
-        model_config = {
+    
+    # Model config
+    if model_type == "gpt2":
+        config = {
             'num_layers': 12,
             'num_heads': 12,
             'hidden_dim': 768,
-            'max_seq_len': 1024
+            'max_seq_len': 1024,
+            'vocab_size': 50257
         }
-
-    num_layers = model_config['num_layers']
-    num_heads = model_config['num_heads']
-    hidden_dim = model_config['hidden_dim']
-    max_seq_len = model_config['max_seq_len']
-    head_dim = hidden_dim // num_heads
-
-    # Encode Prompt
+    else:
+        raise NotImplementedError("Mistral config not yet defined")
+    
+    # Encode prompt
     input_ids = tokenizer.encode(prompt, return_tensors='np')
-    prompt_length = input_ids.shape[1]
+    input_ids = jnp.array(input_ids)  # Convert to JAX array
+    batch_size, prompt_len = input_ids.shape
+    
     print(f"Prompt: '{prompt}'")
-    print(f"Prompt Length: {prompt_length} tokens")
-
-    # Initialize Cache
+    print(f"Prompt length: {prompt_len} tokens")
+    
+    # Initialize cache
     if use_cache:
-        cache = initialize_cache(num_layers= num_layers,
-                                 batch_size= 1,
-                                 num_heads= num_heads,
-                                 max_seq_len= max_seq_len,
-                                 head_dim= head_dim)
+        cache = initialize_cache(
+            num_layers=config['num_layers'],
+            batch_size=batch_size,
+            num_heads=config['num_heads'],
+            max_seq_len=config['max_seq_len'],
+            head_dim=config['hidden_dim'] // config['num_heads']
+        )
     else:
         cache = None
-
-    # Generation Loop
-    generated_tokens = []
+    
+    # Track generated tokens
+    generated_ids = input_ids.tolist()[0]  # Start with prompt tokens
+    
+    # Generation loop
     start_time = time.time()
-
-    # NOTE: This is a SIMPLIFIED version
-    # For a full implementation, you'd need to:
-    # - Process prompt tokens (prefill phase)
-    # - Run through all transformer layers
-    # - Handle layer normalization, MLP, residuals
     
-    # For now, we'll note that this requires full model implementation
-    print("\n⚠️  Full generation requires complete transformer implementation")
-    print("    This is a placeholder for the generation loop structure")
+    # PHASE 1: Prefill (process prompt)
+    # For simplicity, we'll process prompt token-by-token (not optimal but works)
+    # Optimal would be parallel processing, but requires batch attention
     
-    # Placeholder return
-    generated_text = prompt + " [generation not fully implemented yet]"
+    print("\nPrefill phase (processing prompt)...")
+    for pos in range(prompt_len):
+        # Get single token
+        token_id = input_ids[:, pos:pos+1]  # [batch, 1]
+        
+        # Get embeddings
+        hidden_states = get_embeddings(token_id, params, position=pos, model_type=model_type)
+        
+        # Forward through all layers
+        for layer_idx in range(config['num_layers']):
+            layer_params = params['params']['transformer']['h'][str(layer_idx)]
+            hidden_states, cache = transformer_layer(
+                hidden_states=hidden_states,
+                layer_params=layer_params,
+                cache=cache,
+                layer_idx=layer_idx,
+                position=pos,
+                num_heads=config['num_heads'],
+                use_cache=use_cache,
+                model_type=model_type
+            )
+        
+        # LM head (only need logits on last prefill token)
+        if pos == prompt_len - 1:
+            logits = lm_head(hidden_states, params, model_type)
+            logits = logits[:, -1, :]  # [batch, vocab_size]
+    
+    print(f"✓ Prefill complete ({prompt_len} tokens)")
+    
+    # PHASE 2: Generate new tokens
+    print(f"\nGenerating {max_new_tokens} new tokens...")
+    
+    key = jax.random.PRNGKey(42)
+    
+    for step in range(max_new_tokens):
+        current_pos = prompt_len + step
+        
+        # Sample next token
+        key, subkey = jax.random.split(key)
+        next_token = sample_token(logits, temperature, top_k, subkey)
+        
+        # Append to sequence
+        generated_ids.append(int(next_token[0]))
+        
+        # Check for EOS
+        if next_token[0] == tokenizer.eos_token_id:
+            print(f"✓ EOS token generated at step {step}")
+            break
+        
+        # Prepare next input
+        next_token_id = next_token.reshape(1, 1)  # [batch, 1]
+        
+        # Get embeddings
+        hidden_states = get_embeddings(next_token_id, params, position=current_pos, model_type=model_type)
+        
+        # Forward through all layers
+        for layer_idx in range(config['num_layers']):
+            layer_params = params['params']['transformer']['h'][str(layer_idx)]
+            hidden_states, cache = transformer_layer(
+                hidden_states=hidden_states,
+                layer_params=layer_params,
+                cache=cache,
+                layer_idx=layer_idx,
+                position=current_pos,
+                num_heads=config['num_heads'],
+                use_cache=use_cache,
+                model_type=model_type
+            )
+        
+        # LM head
+        logits = lm_head(hidden_states, params, model_type)
+        logits = logits[:, -1, :]  # [batch, vocab_size]
+        
+        # Progress indicator
+        if (step + 1) % 10 == 0:
+            print(f"  Generated {step + 1}/{max_new_tokens} tokens...")
+    
+    # Decode
     elapsed = time.time() - start_time
+    generated_text = tokenizer.decode(generated_ids)
     
+    # Stats
+    num_generated = len(generated_ids) - prompt_len
     stats = {
-        'prompt_length': prompt_length,
-        'generated_tokens': len(generated_tokens),
+        'prompt_length': prompt_len,
+        'generated_tokens': num_generated,
+        'total_tokens': len(generated_ids),
         'time_elapsed': elapsed,
-        'tokens_per_sec': len(generated_tokens) / elapsed if elapsed > 0 else 0
+        'tokens_per_sec': num_generated / elapsed if elapsed > 0 else 0,
+        'use_cache': use_cache
     }
     
     return generated_text, stats
