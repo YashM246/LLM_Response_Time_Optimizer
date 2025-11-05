@@ -175,3 +175,122 @@ def cached_attention(hidden_states: jnp.ndarray,    # [batch, 1, hiddem_dim]
     output = merge_heads(output)
 
     return output, cache
+
+def get_embeddings(input_ids: jnp.ndarray,
+                   params: dict,
+                   model_type:str="gpt2")-> jnp.ndarray:
+    # Get token embeddings from input token IDs
+    #
+    # Args:
+    #           input_ids: Token IDs [batch, seq_len]
+    #           params: Model Parameters (converted JAX params)
+    #           model_type: 'gpt2' or 'mistral'
+    #
+    # Returns:
+    #           embeddings: Token embeddings [batch, seq_len, hidden_dim]
+    #
+    # 1) Extract embedding weights from params
+    # 2) For GPT2: params['params']['transformer']['wte']['embedding']
+    # 3) Use jnp.take() or embeddings[input_ids] to lookup
+    # 4) Add position embeddings for GPT2
+    pass
+
+def sample_token(logits: jnp.ndarray,
+                 temperature: float=1.0,
+                 top_k:int=50,
+                 key:jax.random.PRNGKey = None)-> jnp.ndarray:
+    # Sample next token from logits
+    #
+    # Args:
+    #           logits: Model output logits [batch, vocab_size]
+    #           temperature: Sampling temperature (higher=more random)
+    #           top_k: Only sample from top K tokens (0 = no filtering)
+    #           key = JAX random key
+    #
+    # Returns:
+    #           next_token: Sampled token ID [batch]
+
+    if key is None:
+        key = jax.random.PRNGKey(0)
+
+    # Greedy Decoding
+    if temperature==0.0:
+        return jnp.argmax(logits, axis=-1)
+    
+    # Temperature sampling
+    logits = logits / temperature
+
+    # Top-k Filtering
+    if top_k>0:
+        # Get top-k values and indices
+        top_k_logits, top_k_indices = jax.lax.top_k(logits, top_k)
+
+        # Sample from top-k
+        probs = jax.nn.softmax(top_k_logits, axis=-1)
+        sampled_idx = jax.random.categorical(key, jnp.log(probs), axis=-1)
+
+        # Map back to original vocab
+        next_token = top_k_indices[jnp.arange(logits.shape[0]), sampled_idx]
+    else:
+        # Sample from full distribution
+        probs = jax.nn.softmax(logits, axis=-1)
+        next_token = jax.random.categorical(key, jnp.log(probs), axis=-1)
+    
+    return next_token
+
+
+def forward_pass_single_layer(hidden_states: jnp.ndarray,
+                              layer_params: dict,
+                              cache: dict,
+                              layer_idx: int,
+                              position: int,
+                              num_heads: int,
+                              use_cache: bool=True)-> Tuple[jnp.ndarray, dict]:
+    # Forward Pass through a single transformer layer
+    #
+    # Args:
+    #           hidden_states: Input [batch, 1, hidden_dim]
+    #           layer_params: Parameters for this layer
+    #           cache: KV-cache
+    #           layer_idx: Layer Index
+    #           position: Current Position
+    #           num_heads: Number of attention heads
+    #           use_cache: Whether to use cache
+    #
+    # Returns:
+    #           output: Layer output [batch, 1, hidden_dim]
+    #           cache: Updated cache
+    pass
+
+
+def generate_text_with_cache(params: dict,
+                             tokenizer,
+                             prompt: str,
+                             max_new_tokens: int=50,
+                             temperature: float=1.0,
+                             use_cache: bool= True,
+                             model_config: dict= None) -> Tuple[str, dict]:
+    # Generate text using cached attention
+    #
+    # Args:
+    #           params: Converted JAX model parameters
+    #           tokenizer: HuggingFace tokenizer
+    #           prompt: Input prompt string
+    #           max_new_tokens: Number of tokens to generate
+    #           temperature: Sampling temperature
+    #           use_cache: Whether to use KV-Cache
+    #           model_config: Model configuration (num_layers, num_heads, etc)
+    #
+    # Returns:
+    #           generated_text: Full generated string
+    #           stats: Generation statistics
+    #
+    # 1) Encode prompt to token IDs
+    # 2) Initialize KV Cache
+    # 3) For each posn:
+    #       a) Get Embeddings
+    #       b) Run thru transf layers with cache
+    #       c) Sample next token
+    #       d) Append to sequence
+    # 4) Decode and return
+    pass
