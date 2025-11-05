@@ -178,12 +178,14 @@ def cached_attention(hidden_states: jnp.ndarray,    # [batch, 1, hiddem_dim]
 
 def get_embeddings(input_ids: jnp.ndarray,
                    params: dict,
+                   position:int= None,
                    model_type:str="gpt2")-> jnp.ndarray:
     # Get token embeddings from input token IDs
     #
     # Args:
     #           input_ids: Token IDs [batch, seq_len]
     #           params: Model Parameters (converted JAX params)
+    #           position: Starting position (for KV-cache, position offset)
     #           model_type: 'gpt2' or 'mistral'
     #
     # Returns:
@@ -193,7 +195,36 @@ def get_embeddings(input_ids: jnp.ndarray,
     # 2) For GPT2: params['params']['transformer']['wte']['embedding']
     # 3) Use jnp.take() or embeddings[input_ids] to lookup
     # 4) Add position embeddings for GPT2
-    pass
+    
+    if model_type == "gpt2":
+        # GPT2: Token Embeddings + Position Embeddings
+
+        wte = params['params']['transformer']['wte']['embedding']
+        token_embeds = wte[input_ids]
+
+        # Position Embedding
+        wpe = params['params']['transformer']['wpe']['embedding']
+        batch_size, seq_len = input_ids.shape
+
+        if position is not None:
+            # During generation: Use offset posn
+            positions = jnp.arange(position, position+seq_len)
+        else:
+            # During prefill: Use sequential posn
+            positions = jnp.arange(seq_len)
+        
+        position_embeds = wpe[positions]
+
+        # Add token+posn embeddings
+        embeddings = token_embeds + position_embeds
+    
+    else:
+        # Mistral uses RoPE (rotary position embeddings)
+        # For now, just token embeddings
+        embed_tokens = params['params']['model']['embed_tokens']['embedding']
+        embeddings = embed_tokens[input_ids]
+    
+    return embeddings
 
 def sample_token(logits: jnp.ndarray,
                  temperature: float=1.0,
@@ -293,4 +324,65 @@ def generate_text_with_cache(params: dict,
     #       c) Sample next token
     #       d) Append to sequence
     # 4) Decode and return
-    pass
+
+    import time
+    from src.kv_cache import initialize_cache
+
+    # Extract config
+    if model_config is None:
+        # Default GPT2 config
+        model_config = {
+            'num_layers': 12,
+            'num_heads': 12,
+            'hidden_dim': 768,
+            'max_seq_len': 1024
+        }
+
+    num_layers = model_config['num_layers']
+    num_heads = model_config['num_heads']
+    hidden_dim = model_config['hidden_dim']
+    max_seq_len = model_config['max_seq_len']
+    head_dim = hidden_dim // num_heads
+
+    # Encode Prompt
+    input_ids = tokenizer.encode(prompt, return_tensors='np')
+    prompt_length = input_ids.shape[1]
+    print(f"Prompt: '{prompt}'")
+    print(f"Prompt Length: {prompt_length} tokens")
+
+    # Initialize Cache
+    if use_cache:
+        cache = initialize_cache(num_layers= num_layers,
+                                 batch_size= 1,
+                                 num_heads= num_heads,
+                                 max_seq_len= max_seq_len,
+                                 head_dim= head_dim)
+    else:
+        cache = None
+
+    # Generation Loop
+    generated_tokens = []
+    start_time = time.time()
+
+    # NOTE: This is a SIMPLIFIED version
+    # For a full implementation, you'd need to:
+    # - Process prompt tokens (prefill phase)
+    # - Run through all transformer layers
+    # - Handle layer normalization, MLP, residuals
+    
+    # For now, we'll note that this requires full model implementation
+    print("\n⚠️  Full generation requires complete transformer implementation")
+    print("    This is a placeholder for the generation loop structure")
+    
+    # Placeholder return
+    generated_text = prompt + " [generation not fully implemented yet]"
+    elapsed = time.time() - start_time
+    
+    stats = {
+        'prompt_length': prompt_length,
+        'generated_tokens': len(generated_tokens),
+        'time_elapsed': elapsed,
+        'tokens_per_sec': len(generated_tokens) / elapsed if elapsed > 0 else 0
+    }
+    
+    return generated_text, stats
