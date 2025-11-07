@@ -318,12 +318,13 @@ def transformer_layer(hidden_states: jnp.ndarray,
 
     if model_type == "gpt2":
         # 1) Pre Layer Norm for Attention
-        ln_1_gamma = layer_params['ln_1']['scale']
-        ln_1_beta = layer_params['ln_1']['bias']
-        normed = layer_norm(hidden_states, ln_1_gamma, ln_1_beta)
+        ln_1_weight = layer_params['ln_1']['kernel']
+        ln_1_bias = layer_params['ln_1']['bias']
+        normed = layer_norm(hidden_states, ln_1_weight, ln_1_bias)
 
         # 2) Cached Attention
-        attn_weights = layer_params['attn']['c_attn']['kernel']     # [hidden, 3*hidden]
+        attn_weights = layer_params['attn']['c_attn']['kernel']     # [2304, 768] - transposed
+        attn_weights = attn_weights.T  # Transpose to [768, 2304] for correct shape
         attn_output, cache = cached_attention(hidden_states= normed,
                                               attn_weights= attn_weights,
                                               num_heads= num_heads,
@@ -341,9 +342,9 @@ def transformer_layer(hidden_states: jnp.ndarray,
         hidden_states = hidden_states + attn_output
 
         # 5) Pre-LayerNorm for MLP
-        ln_2_gamma = layer_params['ln_2']['scale']
-        ln_2_beta = layer_params['ln_2']['bias']
-        normed = layer_norm(hidden_states, ln_2_gamma, ln_2_beta)
+        ln_2_weight = layer_params['ln_2']['kernel']
+        ln_2_bias = layer_params['ln_2']['bias']
+        normed = layer_norm(hidden_states, ln_2_weight, ln_2_bias)
 
         # 6) MLP
         mlp_output = mlp(normed, layer_params['mlp'], model_type)
@@ -372,9 +373,9 @@ def lm_head(hidden_states: jnp.ndarray,
 
     if model_type=="gpt2":
         # Final layer norm
-        ln_f_gamma = params['params']['transformer']['ln_f']['scale']
-        ln_f_beta = params['params']['transformer']['ln_f']['bias']
-        hidden_states = layer_norm(hidden_states, ln_f_gamma, ln_f_beta)
+        ln_f_weight = params['params']['transformer']['ln_f']['kernel']
+        ln_f_bias = params['params']['transformer']['ln_f']['bias']
+        hidden_states = layer_norm(hidden_states, ln_f_weight, ln_f_bias)
         
         # Project to vocabulary
         # GPT-2 ties weights: lm_head uses same weights as token embedding
