@@ -155,11 +155,20 @@ def cached_attention(hidden_states: jnp.ndarray,    # [batch, 1, hiddem_dim]
     # Step 5: Apply Causal mask (optional, but good practice)
     # Since we only attend to past positions, mask is already satisfied
     # But add it for correctness
-    current_len = position+1
-    mask = causal_mask(current_len)
-    # For generation with seq_len=1, we need mask for [1,current_len]
-    # Take last row of mask
-    mask = mask[-1:, :]
+    _, _, query_len, _ = Q.shape
+    _, _, kv_len, _ = K_all.shape
+
+    if query_len == 1 and kv_len > 1:
+        # Cached generation: query is single token, attending to multiple cached positions
+        # Use last row of causal mask
+        mask = causal_mask(kv_len)
+        mask = mask[-1:, :]  # [1, kv_len]
+    else:
+        # Non-cached or first token: query and kv have same length
+        mask = causal_mask(query_len)
+        # Slice to match shapes
+        mask = mask[:query_len, :kv_len]  # [query_len, kv_len]
+
     scores = scores + mask
 
     # Step 6: Softmax
@@ -272,7 +281,8 @@ def mlp(x: jnp.ndarray,
 
     if model_type == "gpt2":
         # Expansion
-        c_fc_weight = mlp_params['c_fc']['kernel']
+        c_fc_weight = mlp_params['c_fc']['kernel']  # [3072, 768] - transposed
+        c_fc_weight = c_fc_weight.T  # Transpose to [768, 3072] for correct shape
         c_fc_bias = mlp_params['c_fc']['bias']
 
         hidden = x @ c_fc_weight + c_fc_bias    # [batch, seq, 4*hidden]
@@ -281,7 +291,8 @@ def mlp(x: jnp.ndarray,
         hidden = jax.nn.gelu(hidden)
 
         # Projection
-        c_proj_weight = mlp_params['c_proj']['kernel']
+        c_proj_weight = mlp_params['c_proj']['kernel']  # [768, 3072] - transposed
+        c_proj_weight = c_proj_weight.T  # Transpose to [3072, 768] for correct shape
         c_proj_bias = mlp_params['c_proj']['bias']
 
         output = hidden @ c_proj_weight + c_proj_bias
