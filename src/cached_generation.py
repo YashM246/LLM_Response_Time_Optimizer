@@ -494,7 +494,8 @@ def generate_text_with_cache(params: dict,
             batch_size=batch_size,
             num_heads=config['num_heads'],
             max_seq_len=config['max_seq_len'],
-            head_dim=config['hidden_dim'] // config['num_heads']
+            head_dim=config['hidden_dim'] // config['num_heads'],
+            dtype=jnp.float16  # Match model parameter dtype
         )
     else:
         cache = None
