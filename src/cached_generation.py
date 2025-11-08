@@ -126,7 +126,7 @@ def cached_attention(hidden_states: jnp.ndarray,    # [batch, 1, hiddem_dim]
     # K_new: [batch, num_heads, 1, head_dim]
     # V_new: [batch, num_heads, 1, head_dim]
 
-    if use_cache and position>0:
+    if position>0:
         # Step 2: Update cache with new K, V
         cache = update_cache(cache=cache,
                              layer_idx=layer_idx,
@@ -138,10 +138,9 @@ def cached_attention(hidden_states: jnp.ndarray,    # [batch, 1, hiddem_dim]
         K_all, V_all = get_cached_kv(cache, layer_idx, cache_length=position+1)
     
     else:
-        # Either first position or no cache -> Use new K and V
-        if use_cache:
-            cache = update_cache(cache, layer_idx, K_new, V_new, 0)
-
+        # First position (position == 0)
+        # Always update cache at position 0
+        cache = update_cache(cache, layer_idx, K_new, V_new, 0)
         K_all = K_new
         V_all = V_new
 
