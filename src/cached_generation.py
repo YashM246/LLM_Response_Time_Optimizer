@@ -238,34 +238,23 @@ def get_embeddings(input_ids: jnp.ndarray,
     # 4) Add position embeddings for GPT2
     
     if model_type == "gpt2":
-        # GPT2: Token Embeddings + Position Embeddings
-
-        wte = params['params']['transformer']['wte']['embedding']
-        token_embeds = wte[input_ids]
-
-        # Position Embedding
-        wpe = params['params']['transformer']['wpe']['embedding']
-        batch_size, seq_len = input_ids.shape
+        # Token Embedding
+        token_emb = params['params']['transformer']['wte']['embedding'][input_ids]
+        # token_emb: [batch, seq_len, hidden_dim]
 
         if position is not None:
-            # During generation: Use offset posn
-            positions = jnp.arange(position, position+seq_len)
+            # Single position mode (Cached)
+            pos_emb = params['params']['transformer']['wpe']['embedding'][position]
+            pos_emb = pos_emb[None, None, :]  # [1, 1, hidden_dim]
         else:
-            # During prefill: Use sequential posn
+            # Batch Mode - create posn array [0, 1, 2, ..., seq_len-1]
+            seq_len = input_ids.shape[1]
             positions = jnp.arange(seq_len)
+            pos_emb = params['params']['transformer']['wpe']['embedding'][positions]
+            pos_emb = pos_emb[None, :, :]  # [1, seq_len, hidden_dim]
         
-        position_embeds = wpe[positions]
-
-        # Add token+posn embeddings
-        embeddings = token_embeds + position_embeds
-    
-    else:
-        # Mistral uses RoPE (rotary position embeddings)
-        # For now, just token embeddings
-        embed_tokens = params['params']['model']['embed_tokens']['embedding']
-        embeddings = embed_tokens[input_ids]
-    
-    return embeddings
+        embeddings = token_emb + pos_emb
+        return embeddings
 
 def layer_norm(x: jnp.ndarray,
                gamma: jnp.ndarray,  # Scale Parameter
@@ -365,16 +354,25 @@ def transformer_layer(hidden_states: jnp.ndarray,
         ln_1_bias = layer_params['ln_1']['bias']
         normed = layer_norm(hidden_states, ln_1_weight, ln_1_bias)
 
-        # 2) Cached Attention
+        # 2) Attention (choose cached or batch based on use_cache)
         attn_weights = layer_params['attn']['c_attn']['kernel']     # [2304, 768] - transposed
         attn_weights = attn_weights.T  # Transpose to [768, 2304] for correct shape
-        attn_output, cache = cached_attention(hidden_states= normed,
-                                              attn_weights= attn_weights,
-                                              num_heads= num_heads,
-                                              cache= cache,
-                                              layer_idx= layer_idx,
-                                              position= position,
-                                              use_cache= use_cache)
+
+        if use_cache:
+            # Token-by-token processing with cache
+            attn_output, cache = cached_attention(hidden_states=normed,
+                                                  attn_weights=attn_weights,
+                                                  num_heads=num_heads,
+                                                  cache=cache,
+                                                  layer_idx=layer_idx,
+                                                  position=position,
+                                                  use_cache=use_cache)
+        else:
+            # Batch processing without cache (all tokens at once)
+            attn_output = batch_attention(hidden_states=normed,
+                                         attn_weights=attn_weights,
+                                         num_heads=num_heads)
+            # Cache is not used in batch mode
         
         # 3) Attention output projection
         c_proj_weight = layer_params['attn']['c_proj']['kernel']
@@ -530,7 +528,7 @@ def generate_text_with_cache(params: dict,
     print(f"Prompt: '{prompt}'")
     print(f"Prompt length: {prompt_len} tokens")
     
-    # Initialize cache
+    # Initialize cache (only needed for cached mode)
     if use_cache:
         cache = initialize_cache(
             num_layers=config['num_layers'],
@@ -542,90 +540,143 @@ def generate_text_with_cache(params: dict,
         )
     else:
         cache = None
-    
+
     # Track generated tokens
     generated_ids = input_ids.tolist()[0]  # Start with prompt tokens
-    
+
     # Generation loop
     start_time = time.time()
-    
+
     # PHASE 1: Prefill (process prompt)
-    # For simplicity, we'll process prompt token-by-token (not optimal but works)
-    # Optimal would be parallel processing, but requires batch attention
-    
     print("\nPrefill phase (processing prompt)...")
-    for pos in range(prompt_len):
-        # Get single token
-        token_id = input_ids[:, pos:pos+1]  # [batch, 1]
-        
-        # Get embeddings
-        hidden_states = get_embeddings(token_id, params, position=pos, model_type=model_type)
-        
+
+    if use_cache:
+        # Token-by-token prefill with cache
+        print("Mode: Token-by-token with cache")
+        for pos in range(prompt_len):
+            # Get single token
+            token_id = input_ids[:, pos:pos+1]  # [batch, 1]
+
+            # Get embeddings
+            hidden_states = get_embeddings(token_id, params, position=pos, model_type=model_type)
+
+            # Forward through all layers
+            for layer_idx in range(config['num_layers']):
+                layer_params = params['params']['transformer']['h'][str(layer_idx)]
+                hidden_states, cache = transformer_layer(
+                    hidden_states=hidden_states,
+                    layer_params=layer_params,
+                    cache=cache,
+                    layer_idx=layer_idx,
+                    position=pos,
+                    num_heads=config['num_heads'],
+                    use_cache=use_cache,
+                    model_type=model_type
+                )
+
+            # LM head (only need logits on last prefill token)
+            if pos == prompt_len - 1:
+                logits = lm_head(hidden_states, params, model_type)
+                logits = logits[:, -1, :]  # [batch, vocab_size]
+    else:
+        # Batch prefill (all tokens at once) - no cache
+        print("Mode: Batch processing (all tokens at once)")
+
+        # Get embeddings for ALL prompt tokens at once
+        hidden_states = get_embeddings(input_ids, params, position=None, model_type=model_type)
+        # hidden_states: [batch, prompt_len, hidden_dim]
+
         # Forward through all layers
         for layer_idx in range(config['num_layers']):
             layer_params = params['params']['transformer']['h'][str(layer_idx)]
-            hidden_states, cache = transformer_layer(
+            hidden_states, _ = transformer_layer(
                 hidden_states=hidden_states,
                 layer_params=layer_params,
-                cache=cache,
+                cache=None,
                 layer_idx=layer_idx,
-                position=pos,
+                position=0,  # Not used in batch mode
                 num_heads=config['num_heads'],
-                use_cache=use_cache,
+                use_cache=False,
                 model_type=model_type
             )
-        
-        # LM head (only need logits on last prefill token)
-        if pos == prompt_len - 1:
-            logits = lm_head(hidden_states, params, model_type)
-            logits = logits[:, -1, :]  # [batch, vocab_size]
+
+        # Get logits for last position only
+        logits = lm_head(hidden_states, params, model_type)
+        logits = logits[:, -1, :]  # [batch, vocab_size]
     
     print(f"✓ Prefill complete ({prompt_len} tokens)")
     
     # PHASE 2: Generate new tokens
     print(f"\nGenerating {max_new_tokens} new tokens...")
-    
+
     key = jax.random.PRNGKey(42)
-    
+
     for step in range(max_new_tokens):
         current_pos = prompt_len + step
-        
+
         # Sample next token
         key, subkey = jax.random.split(key)
         next_token = sample_token(logits, temperature, top_k, subkey)
-        
+
         # Append to sequence
         generated_ids.append(int(next_token[0]))
-        
+
         # Check for EOS
         if next_token[0] == tokenizer.eos_token_id:
             print(f"✓ EOS token generated at step {step}")
             break
-        
-        # Prepare next input
-        next_token_id = next_token.reshape(1, 1)  # [batch, 1]
-        
-        # Get embeddings
-        hidden_states = get_embeddings(next_token_id, params, position=current_pos, model_type=model_type)
-        
-        # Forward through all layers
-        for layer_idx in range(config['num_layers']):
-            layer_params = params['params']['transformer']['h'][str(layer_idx)]
-            hidden_states, cache = transformer_layer(
-                hidden_states=hidden_states,
-                layer_params=layer_params,
-                cache=cache,
-                layer_idx=layer_idx,
-                position=current_pos,
-                num_heads=config['num_heads'],
-                use_cache=use_cache,
-                model_type=model_type
-            )
-        
-        # LM head
-        logits = lm_head(hidden_states, params, model_type)
-        logits = logits[:, -1, :]  # [batch, vocab_size]
-        
+
+        if use_cache:
+            # Cached mode: process only the new token
+            # Prepare next input
+            next_token_id = next_token.reshape(1, 1)  # [batch, 1]
+
+            # Get embeddings
+            hidden_states = get_embeddings(next_token_id, params, position=current_pos, model_type=model_type)
+
+            # Forward through all layers
+            for layer_idx in range(config['num_layers']):
+                layer_params = params['params']['transformer']['h'][str(layer_idx)]
+                hidden_states, cache = transformer_layer(
+                    hidden_states=hidden_states,
+                    layer_params=layer_params,
+                    cache=cache,
+                    layer_idx=layer_idx,
+                    position=current_pos,
+                    num_heads=config['num_heads'],
+                    use_cache=True,
+                    model_type=model_type
+                )
+
+            # LM head
+            logits = lm_head(hidden_states, params, model_type)
+            logits = logits[:, -1, :]  # [batch, vocab_size]
+        else:
+            # Non-cached mode: reprocess ALL tokens from scratch
+            # This is SLOW but allows comparison
+            all_token_ids = jnp.array([generated_ids])  # [batch, seq_len]
+
+            # Get embeddings for all tokens
+            hidden_states = get_embeddings(all_token_ids, params, position=None, model_type=model_type)
+
+            # Forward through all layers
+            for layer_idx in range(config['num_layers']):
+                layer_params = params['params']['transformer']['h'][str(layer_idx)]
+                hidden_states, _ = transformer_layer(
+                    hidden_states=hidden_states,
+                    layer_params=layer_params,
+                    cache=None,
+                    layer_idx=layer_idx,
+                    position=0,  # Not used in batch mode
+                    num_heads=config['num_heads'],
+                    use_cache=False,
+                    model_type=model_type
+                )
+
+            # Get logits for last position
+            logits = lm_head(hidden_states, params, model_type)
+            logits = logits[:, -1, :]  # [batch, vocab_size]
+
         # Progress indicator
         if (step + 1) % 10 == 0:
             print(f"  Generated {step + 1}/{max_new_tokens} tokens...")
