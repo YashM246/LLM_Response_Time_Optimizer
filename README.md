@@ -50,13 +50,19 @@ Evaluation on 1,000 instructions from the Alpaca dataset measuring:
 
 | Metric | Non-Cached | Cached (Optimized) | Improvement |
 |--------|------------|-------------------|-------------|
-| Tokens/sec | 0.68 | 8.06 | **11.80x faster** ✨ |
-| Time (15 tokens) | 21.95s | 1.86s | **11.80x faster** |
+| Tokens/sec | 0.64 | 8.58 | **13.45x faster** |
+| Time (15 tokens) | 23.52s | 1.75s | **13.45x faster** |
 | Memory (INT8) | 163MB | 163MB + cache | **2.00x reduction** |
-| Output Match | ✅ Identical | ✅ Identical | **Perfect** |
+| Output Match | Identical | Identical | **Perfect** |
+| Quality | Correct text | Correct text | **100%** |
 
-**Status:** Phase 4 (KV-Cache) complete! Achieved **11.80x speedup** (exceeds 2-3x target).
-**Next:** Text quality improvements + JIT compilation for additional speedup.
+**Status:** Phase 4 (KV-Cache) complete!
+- Achieved **13.45x speedup** (exceeds 2-3x target)
+- Fixed critical bug in attention output projection
+- Text generation quality verified (identical to PyTorch)
+- All benchmarks passing
+
+**Next:** JIT compilation for additional speedup.
 
 ## Expected Final Results (Mistral-7B)
 

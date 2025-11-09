@@ -27,7 +27,7 @@ def test_generation_basic():
     params_tree = build_flax_pytree(jax_state_dict)
     params = {'params': params_tree}
     
-    print("✓ Model loaded and converted")
+    print("[OK] Model loaded and converted")
     
     # Generate text
     prompt = "Hello, my name is"
@@ -60,7 +60,7 @@ def test_generation_basic():
     
     # Verify output is longer than prompt
     assert len(generated_text) > len(prompt), "Generated text should be longer than prompt"
-    print("\n✓ Basic generation test passed!")
+    print("\n[OK] Basic generation test passed!")
 
 
 def test_generation_with_vs_without_cache():
@@ -75,7 +75,7 @@ def test_generation_with_vs_without_cache():
     jax_state_dict = convert_pytorch_to_jax(pytorch_state_dict)
     params_tree = build_flax_pytree(jax_state_dict)
     params = {'params': params_tree}
-    print("✓ Model loaded")
+    print("[OK] Model loaded")
     
     prompt = "The quick brown fox"
     max_tokens = 15
@@ -92,7 +92,7 @@ def test_generation_with_vs_without_cache():
         model_type="gpt2"
     )
     
-    print(f"\n✓ WITH cache: {stats_cached['tokens_per_sec']:.2f} tokens/sec")
+    print(f"\n[OK] WITH cache: {stats_cached['tokens_per_sec']:.2f} tokens/sec")
     
     # Test WITHOUT cache
     print(f"\n[WITHOUT CACHE] Generating {max_tokens} tokens...")
@@ -106,7 +106,7 @@ def test_generation_with_vs_without_cache():
         model_type="gpt2"
     )
     
-    print(f"\n✓ WITHOUT cache: {stats_uncached['tokens_per_sec']:.2f} tokens/sec")
+    print(f"\n[OK] WITHOUT cache: {stats_uncached['tokens_per_sec']:.2f} tokens/sec")
     
     # Compare speeds
     speedup = stats_cached['tokens_per_sec'] / stats_uncached['tokens_per_sec']
@@ -128,21 +128,21 @@ def test_generation_with_vs_without_cache():
         print("   Continuing to analyze the issue...")
         # Don't assert for now, let's see the full results
     else:
-        print("✓ Both methods produce identical output")
+        print("[OK] Both methods produce identical output")
     
     # Verify speedup (should be faster with cache)
     if speedup <= 1.0:
         print(f"\n⚠️  WARNING: Cache is slower! Got {speedup:.2f}x (expected >1.0x)")
         print("   This suggests overhead or implementation issue.")
     else:
-        print(f"✓ Cached version is {speedup:.2f}x faster")
+        print(f"[OK] Cached version is {speedup:.2f}x faster")
     
     if speedup >= 1.5:
-        print("✓ Achieved significant speedup (≥1.5x)")
+        print("[OK] Achieved significant speedup (>=1.5x)")
     if speedup >= 2.0:
-        print("🎉 Excellent speedup (≥2.0x)!")
+        print("🎉 Excellent speedup (>=2.0x)!")
     
-    print("\n✓ Cached vs non-cached test passed!")
+    print("\n[OK] Cached vs non-cached test passed!")
 
 
 def test_different_prompts():
@@ -157,7 +157,7 @@ def test_different_prompts():
     jax_state_dict = convert_pytorch_to_jax(pytorch_state_dict)
     params_tree = build_flax_pytree(jax_state_dict)
     params = {'params': params_tree}
-    print("✓ Model loaded")
+    print("[OK] Model loaded")
     
     prompts = [
         "Once upon a time",
@@ -181,7 +181,7 @@ def test_different_prompts():
         print(f"Generated: {text}")
         print(f"Speed: {stats['tokens_per_sec']:.2f} tokens/sec")
     
-    print("\n✓ Multiple prompts test passed!")
+    print("\n[OK] Multiple prompts test passed!")
 
 
 def test_temperature_sampling():
@@ -196,7 +196,7 @@ def test_temperature_sampling():
     jax_state_dict = convert_pytorch_to_jax(pytorch_state_dict)
     params_tree = build_flax_pytree(jax_state_dict)
     params = {'params': params_tree}
-    print("✓ Model loaded")
+    print("[OK] Model loaded")
     
     prompt = "The weather today is"
     temperatures = [0.0, 0.5, 1.0]  # Greedy, conservative, diverse
@@ -216,7 +216,7 @@ def test_temperature_sampling():
         
         print(f"Generated: {text}")
     
-    print("\n✓ Temperature sampling test passed!")
+    print("\n[OK] Temperature sampling test passed!")
 
 
 if __name__ == "__main__":
@@ -228,10 +228,10 @@ if __name__ == "__main__":
         test_temperature_sampling()
         
         print("\n" + "=" * 70)
-        print("✓ ALL GENERATION TESTS PASSED!")
+        print("[OK] ALL GENERATION TESTS PASSED!")
         print("=" * 70)
         
     except Exception as e:
-        print(f"\n✗ Test failed: {e}")
+        print(f"\n[FAIL] Test failed: {e}")
         import traceback
         traceback.print_exc()

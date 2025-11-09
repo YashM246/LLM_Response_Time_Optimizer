@@ -27,17 +27,27 @@
   - Two prefill strategies: Token-by-token vs batch
   - Updated `get_embeddings()` for both single/batch positions
 
-**Test Results (GPT-2):**
+- ✅ **Fixed critical attention output projection bug**
+  - Bug: Missing transpose for attention `c_proj` weight
+  - Impact: JAX model generated gibberish ("the the the...")
+  - Investigation: Layer-by-layer comparison revealed 130+ divergence in first layer
+  - Root cause: `c_proj` weight used without transpose (line 387)
+  - Fix: Added `c_proj_weight = c_proj_weight.T`
+  - Result: JAX now produces identical text to PyTorch!
+
+**Final Test Results (GPT-2):**
 | Metric | Cached Mode | Non-Cached Mode | Speedup |
 |--------|-------------|-----------------|---------|
-| Speed | 8.06 tok/s | 0.68 tok/s | **11.80x** ✨ |
-| Time | 1.860s | 21.952s | - |
-| Outputs | Identical ✅ | Identical ✅ | - |
+| Speed | 8.58 tok/s | 0.64 tok/s | **13.45x** |
+| Time | 1.75s | 23.52s | - |
+| Outputs | Identical | Identical | Perfect |
+| Quality | Correct text | Correct text | 100% |
 
 **Status:**
-- ✅ Cache optimization working (11.80x speedup - exceeds 2-3x target!)
-- ⚠️ Text quality issue detected (repetitive output)
-- ⏭️ **NEXT:** Investigate text quality, then JIT compilation
+- ✅ Cache optimization working (13.45x speedup - exceeds 2-3x target!)
+- ✅ Text quality issue RESOLVED
+- ✅ All generation tests passing
+- ⏭️ **NEXT:** JIT compilation for additional speedup
 
 ### **Completed Phases:**
 
