@@ -44,6 +44,7 @@ def merge_heads(x: jnp.ndarray)-> jnp.ndarray:
 
 def compute_qkv(hidden_states: jnp.ndarray,
                 attn_weights: jnp.ndarray,  # Combined W_qkv weights
+                attn_bias: jnp.ndarray,     # Combined bias for Q, K, V
                 num_heads: int) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     # Compute Q, K, V projections and split into heads
     #
@@ -51,19 +52,20 @@ def compute_qkv(hidden_states: jnp.ndarray,
     #           hidden_states: Input [batch, seq_len, hidden_dim]
     #           attn_weights: Attention weights [hidden_dim, 3*hidden_dim]
     #                         (GPT-2 combines Q, K, V into single weight matrix)
+    #           attn_bias: Attention bias [3*hidden_dim]
     #           num_heads: Number of attention heads
     #
     # Returns:
     #           Q: Query [batch, num_heads, seq_len, head_dim]
     #           K: Key [batch, num_heads, seq_len, head_dim]
     #           V: Value [batch, num_heads, seq_len, head_dim]
-    
+
     batch_size, seq_len, hidden_dim = hidden_states.shape
 
-    # Linear Proj: [batch, seq, hidden] @ [hidden, 3*hidden]
+    # Linear Proj: [batch, seq, hidden] @ [hidden, 3*hidden] + [3*hidden]
     #            = [batch, seq, 3*hidden]
 
-    qkv = hidden_states @ attn_weights
+    qkv = hidden_states @ attn_weights + attn_bias
 
     # Split into Q, K, V along last dim: 3 x [batch, seq, hidden]
     Q, K, V = jnp.split(qkv, 3, axis=-1)
@@ -95,6 +97,7 @@ def causal_mask(seq_len:int)-> jnp.ndarray:
 
 def cached_attention(hidden_states: jnp.ndarray,    # [batch, 1, hiddem_dim]
                      attn_weights: jnp.ndarray,     # [hidden_dim, 3*hidden_dim]
+                     attn_bias: jnp.ndarray,        # [3*hidden_dim]
                      num_heads: int,
                      cache: dict,
                      layer_idx: int,
@@ -121,7 +124,7 @@ def cached_attention(hidden_states: jnp.ndarray,    # [batch, 1, hiddem_dim]
     head_dim = hidden_dim//num_heads
 
     # Step 1: Compute Q, K, V for New positions only
-    Q, K_new, V_new = compute_qkv(hidden_states, attn_weights, num_heads)
+    Q, K_new, V_new = compute_qkv(hidden_states, attn_weights, attn_bias, num_heads)
     # Q: [batch, num_heads, 1, head_dim]
     # K_new: [batch, num_heads, 1, head_dim]
     # V_new: [batch, num_heads, 1, head_dim]
@@ -187,6 +190,7 @@ def cached_attention(hidden_states: jnp.ndarray,    # [batch, 1, hiddem_dim]
 
 def batch_attention(hidden_states: jnp.ndarray,
                     attn_weights: jnp.ndarray,
+                    attn_bias: jnp.ndarray,
                     num_heads: int) -> jnp.ndarray:
     
     # Multi head attention for batch processing without cache
@@ -196,7 +200,7 @@ def batch_attention(hidden_states: jnp.ndarray,
     head_dim = hidden_dim // num_heads
 
     # Compute Q, K, V for all positions at once
-    Q, K, V = compute_qkv(hidden_states, attn_weights, num_heads)
+    Q, K, V = compute_qkv(hidden_states, attn_weights, attn_bias, num_heads)
     # Q, K, V : [batch, num_heads, seq_len, head_dim]
 
     # Compute attention scores
@@ -357,11 +361,13 @@ def transformer_layer(hidden_states: jnp.ndarray,
         # 2) Attention (choose cached or batch based on use_cache)
         attn_weights = layer_params['attn']['c_attn']['kernel']     # [2304, 768] - transposed
         attn_weights = attn_weights.T  # Transpose to [768, 2304] for correct shape
+        attn_bias = layer_params['attn']['c_attn']['bias']          # [2304]
 
         if use_cache:
             # Token-by-token processing with cache
             attn_output, cache = cached_attention(hidden_states=normed,
                                                   attn_weights=attn_weights,
+                                                  attn_bias=attn_bias,
                                                   num_heads=num_heads,
                                                   cache=cache,
                                                   layer_idx=layer_idx,
@@ -371,11 +377,13 @@ def transformer_layer(hidden_states: jnp.ndarray,
             # Batch processing without cache (all tokens at once)
             attn_output = batch_attention(hidden_states=normed,
                                          attn_weights=attn_weights,
+                                         attn_bias=attn_bias,
                                          num_heads=num_heads)
             # Cache is not used in batch mode
         
         # 3) Attention output projection
-        c_proj_weight = layer_params['attn']['c_proj']['kernel']
+        c_proj_weight = layer_params['attn']['c_proj']['kernel']  # [768, 768] - transposed
+        c_proj_weight = c_proj_weight.T  # Transpose to [768, 768] for correct orientation
         c_proj_bias = layer_params['attn']['c_proj']['bias']
         attn_output = attn_output @ c_proj_weight + c_proj_bias
 
@@ -604,7 +612,7 @@ def generate_text_with_cache(params: dict,
         logits = lm_head(hidden_states, params, model_type)
         logits = logits[:, -1, :]  # [batch, vocab_size]
     
-    print(f"✓ Prefill complete ({prompt_len} tokens)")
+    print(f"[OK] Prefill complete ({prompt_len} tokens)")
     
     # PHASE 2: Generate new tokens
     print(f"\nGenerating {max_new_tokens} new tokens...")
@@ -623,7 +631,7 @@ def generate_text_with_cache(params: dict,
 
         # Check for EOS
         if next_token[0] == tokenizer.eos_token_id:
-            print(f"✓ EOS token generated at step {step}")
+            print(f"[OK] EOS token generated at step {step}")
             break
 
         if use_cache:
