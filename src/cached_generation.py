@@ -184,6 +184,39 @@ def cached_attention(hidden_states: jnp.ndarray,    # [batch, 1, hiddem_dim]
 
     return output, cache
 
+
+def batch_attention(hidden_states: jnp.ndarray,
+                    attn_weights: jnp.ndarray,
+                    num_heads: int) -> jnp.ndarray:
+    
+    # Multi head attention for batch processing without cache
+    # Process all tokens in parallel
+
+    batch_size, seq_len, hidden_dim = hidden_states.shape
+    head_dim = hidden_dim // num_heads
+
+    # Compute Q, K, V for all positions at once
+    Q, K, V = compute_qkv(hidden_states, attn_weights, num_heads)
+    # Q, K, V : [batch, num_heads, seq_len, head_dim]
+
+    # Compute attention scores
+    scores = jnp.matmul(Q, jnp.transpose(K, (0, 1, 3, 2)))
+    scores = scores / jnp.sqrt(head_dim)
+
+    # Apply causal mask
+    mask = causal_mask(seq_len)
+    scores = scores + mask
+
+    # Softmax and apply to values
+    attn_weights = jax.nn.softmax(scores, axis=-1)
+    output = jnp.matmul(attn_weights, V)
+
+    # Merge Heads
+    output = merge_heads(output)
+
+    return output   # [batch, seq_len, hidden_dim]
+
+
 def get_embeddings(input_ids: jnp.ndarray,
                    params: dict,
                    position:int= None,
