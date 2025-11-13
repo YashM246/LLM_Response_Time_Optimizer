@@ -1,8 +1,9 @@
 import jax
 import jax.numpy as jnp
 from typing import Dict, Tuple
+from functools import partial
 
-@jax.jit(static_argnums=(1,))
+@partial(jax.jit, static_argnums=(1,))
 def split_heads(x: jnp.ndarray, num_heads: int)-> jnp.ndarray:
     # Split the hidden dimension into multiple attention heads
     #
@@ -44,7 +45,7 @@ def merge_heads(x: jnp.ndarray)-> jnp.ndarray:
 
     return x
 
-@jax.jit(static_argnums=(3,))
+@partial(jax.jit, static_argnums=(3,))
 def compute_qkv(hidden_states: jnp.ndarray,
                 attn_weights: jnp.ndarray,  # Combined W_qkv weights
                 attn_bias: jnp.ndarray,     # Combined bias for Q, K, V
@@ -80,7 +81,7 @@ def compute_qkv(hidden_states: jnp.ndarray,
 
     return Q, K, V
 
-@jax.jit(static_argnums=(0,))
+@partial(jax.jit, static_argnums=(0,))
 def causal_mask(seq_len:int)-> jnp.ndarray:
     # Create causal attention mask (lower triangle)
     #
@@ -192,7 +193,7 @@ def cached_attention(hidden_states: jnp.ndarray,    # [batch, 1, hiddem_dim]
 
     return output, cache
 
-@jax.jit(static_argnums=(3,))
+@partial(jax.jit, static_argnums=(3,))
 def batch_attention(hidden_states: jnp.ndarray,
                     attn_weights: jnp.ndarray,
                     attn_bias: jnp.ndarray,
@@ -292,7 +293,7 @@ def layer_norm(x: jnp.ndarray,
 
     return output
 
-@jax.jit(static_argnums=(2,))
+@partial(jax.jit, static_argnums=(2,))
 def mlp(x: jnp.ndarray,
         mlp_params: dict,
         model_type: str= "gpt2")-> jnp.ndarray:
@@ -413,7 +414,7 @@ def transformer_layer(hidden_states: jnp.ndarray,
     
     return output, cache
 
-@jax.jit(static_argnums=(2,))
+@partial(jax.jit, static_argnums=(2,))
 def lm_head(hidden_states: jnp.ndarray,
             params: dict,
             model_type: str= "gpt2")-> jnp.ndarray:
