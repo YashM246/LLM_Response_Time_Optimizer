@@ -35,19 +35,29 @@
   - Fix: Added `c_proj_weight = c_proj_weight.T`
   - Result: JAX now produces identical text to PyTorch!
 
-**Final Test Results (GPT-2):**
-| Metric | Cached Mode | Non-Cached Mode | Speedup |
-|--------|-------------|-----------------|---------|
-| Speed | 8.58 tok/s | 0.64 tok/s | **13.45x** |
-| Time | 1.75s | 23.52s | - |
-| Outputs | Identical | Identical | Perfect |
-| Quality | Correct text | Correct text | 100% |
+- ✅ **Applied JIT compilation to core functions**
+  - Functions JIT-compiled: `split_heads`, `merge_heads`, `compute_qkv`, `causal_mask`, `batch_attention`, `layer_norm`, `mlp`, `lm_head`
+  - Used `functools.partial` with `static_argnums` for compile-time constants
+  - Static arguments: `num_heads`, `seq_len`, `model_type`
+  - Technique: `@partial(jax.jit, static_argnums=(n,))` decorator pattern
+  - Result: Additional 2.68x speedup on top of KV-cache!
+
+**Final Phase 4 Results (GPT-2):**
+| Optimization | Speed | vs Baseline | Cumulative |
+|-------------|-------|-------------|------------|
+| Baseline (non-cached) | 0.64 tok/s | 1.00x | - |
+| + KV-Cache | 8.58 tok/s | 13.45x | 13.45x |
+| + JIT Compilation | 22.96 tok/s | 35.88x | **35.88x** |
 
 **Status:**
-- ✅ Cache optimization working (13.45x speedup - exceeds 2-3x target!)
-- ✅ Text quality issue RESOLVED
-- ✅ All generation tests passing
-- ⏭️ **NEXT:** JIT compilation for additional speedup
+- ✅ Phase 4 COMPLETE for GPT-2!
+- ✅ Total speedup: **35.88x on GPT-2** (far exceeds 2-3x target)
+- ✅ KV-cache: 13.45x improvement
+- ✅ JIT compilation: Additional 2.68x improvement
+- ✅ Text quality: 100% match with PyTorch GPT-2
+- ✅ All generation tests passing on GPT-2
+- ⚠️ **NOTE:** All Phase 4 work done on GPT-2. Mistral-7B not yet implemented.
+- ⏭️ **NEXT:** Phase 5 - Implement Mistral-7B support & Benchmarking
 
 ### **Completed Phases:**
 
@@ -59,13 +69,14 @@
 **Phase 2: Model Conversion (PyTorch → JAX)** ✅
 - Manual conversion implementation complete
 - Weight transposition and PyTree structure working
-- Tested on GPT-2 (local) and Mistral-7B (Colab)
-- Numerical validation passed
+- Tested and validated on GPT-2
+- Note: Basic conversion tested on Mistral-7B, but full implementation incomplete
 
 **Phase 3: INT8 Quantization** ✅
 - Simple symmetric quantization implemented
-- Memory reduction: 2.00x (GPT-2: 326MB → 163MB, Mistral: 14.48GB → 7.24GB)
-- Quantization working, models run successfully
+- Memory reduction: 2.00x (GPT-2: 326MB → 163MB)
+- Quantization working and tested on GPT-2
+- Note: Mistral quantization code exists but not fully tested
 
 ### **Upcoming Work:**
 

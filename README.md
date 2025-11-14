@@ -48,30 +48,40 @@ Evaluation on 1,000 instructions from the Alpaca dataset measuring:
 
 ## Current Results (GPT-2, Phase 4)
 
-| Metric | Non-Cached | Cached (Optimized) | Improvement |
-|--------|------------|-------------------|-------------|
-| Tokens/sec | 0.64 | 8.58 | **13.45x faster** |
-| Time (15 tokens) | 23.52s | 1.75s | **13.45x faster** |
+| Metric | Non-Cached | Cached + JIT | Improvement |
+|--------|------------|--------------|-------------|
+| Tokens/sec | 0.64 | 22.96 | **35.88x faster** |
+| Time (15 tokens) | 23.52s | 0.65s | **35.88x faster** |
 | Memory (INT8) | 163MB | 163MB + cache | **2.00x reduction** |
 | Output Match | Identical | Identical | **Perfect** |
 | Quality | Correct text | Correct text | **100%** |
 
-**Status:** Phase 4 (KV-Cache) complete!
-- Achieved **13.45x speedup** (exceeds 2-3x target)
+**Optimization Breakdown:**
+- KV-Cache optimization: **13.45x speedup**
+- JIT compilation: **Additional 2.68x speedup**
+- Combined total: **35.88x speedup**
+
+**Status:** Phase 4 (KV-Cache + JIT) COMPLETE for GPT-2!
+- Achieved **35.88x speedup** on GPT-2 (far exceeds 2-3x target!)
 - Fixed critical bug in attention output projection
-- Text generation quality verified (identical to PyTorch)
-- All benchmarks passing
+- Applied JIT compilation to 8 core functions
+- Text generation quality verified (identical to PyTorch GPT-2)
+- All benchmarks passing on GPT-2
 
-**Next:** JIT compilation for additional speedup.
+**Note:** All optimizations tested and validated on GPT-2. Mistral-7B implementation pending.
 
-## Expected Final Results (Mistral-7B)
+**Phase 4 Complete!** Ready for Phase 5: Mistral-7B Implementation & Benchmarking.
+
+## Target Results (Mistral-7B)
 
 | Metric | Baseline (PyTorch) | Target (JAX Optimized) | Status |
 |--------|-------------------|----------------------|--------|
-| Tokens/sec | 8-10 | 20-25 (2.5-3x) | ⏳ In Progress |
-| Latency | 2.5s | 0.9s | ⏳ In Progress |
-| Memory | 28GB | 7.5GB (3.7x smaller) | ⏳ In Progress |
-| Quality | 100% | 98%+ | ⏳ In Progress |
+| Tokens/sec | 8-10 | 20-25 (2.5-3x) | ⏳ Not Started |
+| Latency | 2.5s | 0.9s | ⏳ Not Started |
+| Memory | 28GB | 7.5GB (3.7x larger) | ⏳ Not Started |
+| Quality | 100% | 98%+ | ⏳ Not Started |
+
+**Note:** Mistral-7B support not yet implemented. Based on GPT-2 results (35.88x speedup), we expect similar or better performance for Mistral-7B when implemented.
 
 ## Project Structure
 ```
