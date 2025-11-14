@@ -40,24 +40,28 @@
   - Used `functools.partial` with `static_argnums` for compile-time constants
   - Static arguments: `num_heads`, `seq_len`, `model_type`
   - Technique: `@partial(jax.jit, static_argnums=(n,))` decorator pattern
-  - Result: Additional 2.68x speedup on top of KV-cache!
+  - Result: KV-Cache + JIT combined for 16.32x speedup (cannot measure separately with decorator approach)
 
 **Final Phase 4 Results (GPT-2):**
-| Optimization | Speed | vs Baseline | Cumulative |
-|-------------|-------|-------------|------------|
-| Baseline (non-cached) | 0.64 tok/s | 1.00x | - |
-| + KV-Cache | 8.58 tok/s | 13.45x | 13.45x |
-| + JIT Compilation | 22.96 tok/s | 35.88x | **35.88x** |
+| Metric | Non-Cached | Cached + JIT | Improvement |
+|--------|------------|--------------|-------------|
+| Speed | 1.50 tok/s | 24.45 tok/s | **16.32x** |
+| Time (15 tokens) | 10.03s | 0.63s | **16.32x faster** |
+| Memory (INT8) | 163MB | 163MB + cache | 2.00x reduction |
 
 **Status:**
 - ✅ Phase 4 COMPLETE for GPT-2!
-- ✅ Total speedup: **35.88x on GPT-2** (far exceeds 2-3x target)
-- ✅ KV-cache: 13.45x improvement
-- ✅ JIT compilation: Additional 2.68x improvement
+- ✅ Total speedup: **16.32x on GPT-2** (measured, far exceeds 2-3x target)
+- ✅ KV-Cache + JIT combined optimization (cannot measure separately with decorator approach)
+- ✅ Applied JIT decorators to 8 core functions: `split_heads`, `merge_heads`, `compute_qkv`, `causal_mask`, `batch_attention`, `layer_norm`, `mlp`, `lm_head`
 - ✅ Text quality: 100% match with PyTorch GPT-2
 - ✅ All generation tests passing on GPT-2
+- ✅ Fixed critical warmup issue: JAX JIT compiles separately for each sequence length
 - ⚠️ **NOTE:** All Phase 4 work done on GPT-2. Mistral-7B not yet implemented.
 - ⏭️ **NEXT:** Phase 5 - Implement Mistral-7B support & Benchmarking
+
+**Important Lesson Learned:**
+JAX JIT compilation is shape-dependent. During autoregressive generation, each token produces a different sequence length, triggering separate compilations. Warmup must generate at least as many tokens as the actual benchmark to ensure all shapes are pre-compiled for accurate performance measurement.
 
 ### **Completed Phases:**
 

@@ -50,23 +50,25 @@ Evaluation on 1,000 instructions from the Alpaca dataset measuring:
 
 | Metric | Non-Cached | Cached + JIT | Improvement |
 |--------|------------|--------------|-------------|
-| Tokens/sec | 0.64 | 22.96 | **35.88x faster** |
-| Time (15 tokens) | 23.52s | 0.65s | **35.88x faster** |
+| Tokens/sec | 1.50 | 24.45 | **16.32x faster** |
+| Time (15 tokens) | 10.03s | 0.63s | **16.32x faster** |
 | Memory (INT8) | 163MB | 163MB + cache | **2.00x reduction** |
 | Output Match | Identical | Identical | **Perfect** |
 | Quality | Correct text | Correct text | **100%** |
 
 **Optimization Breakdown:**
-- KV-Cache optimization: **13.45x speedup**
-- JIT compilation: **Additional 2.68x speedup**
-- Combined total: **35.88x speedup**
+- KV-Cache + JIT combined: **16.32x speedup** (measured)
+- Note: Cannot measure KV-cache vs JIT separately with decorator approach
 
 **Status:** Phase 4 (KV-Cache + JIT) COMPLETE for GPT-2!
-- Achieved **35.88x speedup** on GPT-2 (far exceeds 2-3x target!)
+- Achieved **16.32x speedup** on GPT-2 (far exceeds 2-3x target!)
 - Fixed critical bug in attention output projection
-- Applied JIT compilation to 8 core functions
+- Applied JIT compilation to 8 core functions with `@jax.jit` decorators
 - Text generation quality verified (identical to PyTorch GPT-2)
 - All benchmarks passing on GPT-2
+- Performance measured after proper JIT warmup (all sequence lengths pre-compiled)
+
+**Important:** JAX JIT compiles separately for each input shape. Warmup must generate at least as many tokens as the actual test to ensure all shapes are pre-compiled for accurate benchmarking.
 
 **Note:** All optimizations tested and validated on GPT-2. Mistral-7B implementation pending.
 
@@ -81,7 +83,7 @@ Evaluation on 1,000 instructions from the Alpaca dataset measuring:
 | Memory | 28GB | 7.5GB (3.7x larger) | ⏳ Not Started |
 | Quality | 100% | 98%+ | ⏳ Not Started |
 
-**Note:** Mistral-7B support not yet implemented. Based on GPT-2 results (35.88x speedup), we expect similar or better performance for Mistral-7B when implemented.
+**Note:** Mistral-7B support not yet implemented. Based on GPT-2 results (16.32x speedup), we expect similar or better performance for Mistral-7B when implemented.
 
 ## Project Structure
 ```
