@@ -1,10 +1,27 @@
 # Comprehensive comparison of optimization levels
 #
+# This test demonstrates the performance impact of KV-cache + JIT optimization
+# on GPT-2 text generation using JAX.
+#
 # Tests two configurations:
-# 1) Non cached (Baseline)
-# 2) Cached + JIT (full optimization with decorators)
+# 1) Non cached (Baseline) - Full recomputation for each token
+# 2) Cached + JIT (Full Optimization) - KV-cache + JIT compilation
+#
+# Expected Results:
+# - Non-cached: ~1.5 tok/s
+# - Cached + JIT: ~24 tok/s
+# - Speedup: ~16x
 #
 # Note: Cannot test cache vs JIT separately with decorator approach
+# (decorators are applied at function definition time)
+#
+# IMPORTANT: JAX JIT Compilation Behavior
+# ----------------------------------------
+# JAX compiles separately for each input shape. During autoregressive generation,
+# each token produces a different sequence length. The warmup MUST generate at least
+# as many tokens as the actual test to ensure all shapes are pre-compiled.
+#
+# See BENCHMARKING.md for detailed best practices.
 #
 
 import sys
