@@ -52,7 +52,7 @@ Evaluation on 1,000 instructions from the Alpaca dataset measuring:
 |--------|------------|--------------|-------------|
 | Tokens/sec | 1.50 | 24.45 | **16.32x faster** |
 | Time (15 tokens) | 10.03s | 0.63s | **16.32x faster** |
-| Memory (INT8) | 163MB | 163MB + cache | **2.00x reduction** |
+| Memory (INT8) | 163MB | --MB + cache | **2.00x reduction** |
 | Output Match | Identical | Identical | **Perfect** |
 | Quality | Correct text | Correct text | **100%** |
 
