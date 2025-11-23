@@ -8,10 +8,10 @@ This project demonstrates production-level optimization of large language models
 
 ## Goals
 
-- **Speed**: Reduce response time from ~2.5s to <1s per query
-- **Memory**: Decrease GPU memory usage from 28GB to ~7GB
+- **Speed**: Reduce response time from ~2.5s to <1s per query (2-3x speedup target, achieved 16x on GPT-2!)
+- **Memory**: Decrease GPU memory usage from ~14GB (FP16) to ~7GB (INT8) via quantization
 - **Quality**: Maintain 98%+ output similarity to original model
-- **Cost**: Lower inference costs by 65% for production deployment
+- **Cost**: Lower inference costs through faster generation and reduced memory
 
 ## Tech Stack
 
@@ -32,7 +32,7 @@ This project demonstrates production-level optimization of large language models
 ## Optimization Techniques
 
 1. **Model Conversion**: PyTorch → JAX/Flax for XLA optimization
-2. **INT8 Quantization**: 4x memory reduction on model weights
+2. **INT8 Quantization**: 2x memory reduction on model weights (FP32 → INT8)
 3. **KV-Cache**: Avoid redundant computation during generation
 4. **JIT Compilation**: Fuse operations for faster execution
 5. **Batched Inference**: Process multiple requests efficiently
@@ -52,9 +52,12 @@ Evaluation on 1,000 instructions from the Alpaca dataset measuring:
 |--------|------------|--------------|-------------|
 | Tokens/sec | 1.50 | 24.45 | **16.32x faster** |
 | Time (15 tokens) | 10.03s | 0.63s | **16.32x faster** |
-| Memory (INT8) | 163MB | --MB + cache | **2.00x reduction** |
+| Model Memory (INT8) | 163MB | 163MB | Same (quantized) |
+| KV-Cache Overhead | - | ~38MB | Minimal |
 | Output Match | Identical | Identical | **Perfect** |
 | Quality | Correct text | Correct text | **100%** |
+
+**Memory Note:** INT8 quantization reduces GPT-2 from 326MB (FP32) to 163MB (INT8) = **2.00x reduction**. KV-cache adds ~38MB overhead for storing attention keys/values.
 
 **Optimization Breakdown:**
 - KV-Cache + JIT combined: **16.32x speedup** (measured)
@@ -76,11 +79,11 @@ Evaluation on 1,000 instructions from the Alpaca dataset measuring:
 
 ## Target Results (Mistral-7B)
 
-| Metric | Baseline (PyTorch) | Target (JAX Optimized) | Status |
-|--------|-------------------|----------------------|--------|
-| Tokens/sec | 8-10 | 20-25 (2.5-3x) | ⏳ Not Started |
-| Latency | 2.5s | 0.9s | ⏳ Not Started |
-| Memory | 28GB | 7.5GB (3.7x larger) | ⏳ Not Started |
+| Metric | Baseline (PyTorch FP16) | Target (JAX INT8) | Status |
+|--------|------------------------|-------------------|--------|
+| Tokens/sec | 8-10 | 20-25 (2.5-3x faster) | ⏳ Not Started |
+| Latency | 2.5s | <1s | ⏳ Not Started |
+| Memory | ~14GB | ~7GB (2x reduction) | ⏳ Not Started |
 | Quality | 100% | 98%+ | ⏳ Not Started |
 
 **Note:** Mistral-7B support not yet implemented. Based on GPT-2 results (16.32x speedup), we expect similar or better performance for Mistral-7B when implemented.
@@ -89,14 +92,16 @@ Evaluation on 1,000 instructions from the Alpaca dataset measuring:
 ```
 .
 ├── src/
-│   ├── model_conversion.py    # PyTorch to JAX conversion
-│   ├── quantization.py         # INT8 quantization
-│   ├── generation.py           # Optimized generation with KV-cache
-│   └── benchmarking.py         # Performance evaluation
-├── notebooks/
-│   └── demo.ipynb              # Interactive demonstration
-├── benchmarks/
-│   └── results/                # Performance metrics and plots
+│   ├── model_conversion.py      # PyTorch to JAX conversion
+│   ├── quantization.py          # INT8 quantization
+│   ├── cached_generation.py     # Optimized generation with KV-cache + JIT
+│   └── kv_cache.py              # KV-cache utilities
+├── tests/
+│   ├── test_generation.py       # Generation quality tests
+│   └── test_optimization_comparison.py  # Performance benchmarks
+├── OPTIMIZATION_GUIDE.md        # Detailed optimization documentation
+├── BENCHMARKING.md              # Benchmarking best practices
+├── Execution_Plan.md            # Project roadmap and progress
 └── README.md
 ```
 
