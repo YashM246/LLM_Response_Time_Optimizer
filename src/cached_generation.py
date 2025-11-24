@@ -59,6 +59,41 @@ import jax.numpy as jnp
 from typing import Dict, Tuple
 from functools import partial
 
+
+#####################################
+#       Model Configurations
+#####################################
+
+GPT2_CONFIG = {
+    'num_layers': 12,
+    'num_heads': 12,
+    'num_kv_heads': 12,  # Same as num_heads for standard MHA
+    'hidden_dim': 768,
+    'head_dim': 64,
+    'intermediate_dim': 3072,  # 4 * hidden_dim
+    'vocab_size': 50257,
+    'max_seq_len': 1024,
+    'use_rope': False,
+    'use_rms_norm': False,
+    'use_swiglu': False,
+    'rope_theta': 10000.0,
+}
+
+MISTRAL_CONFIG = {
+    'num_layers': 32,
+    'num_heads': 32,
+    'num_kv_heads': 8,  # GQA: fewer KV heads than Q heads
+    'hidden_dim': 4096,
+    'head_dim': 128,
+    'intermediate_dim': 14336,
+    'vocab_size': 32000,
+    'max_seq_len': 32768,
+    'use_rope': True,
+    'use_rms_norm': True,
+    'use_swiglu': True,
+    'rope_theta': 10000.0,
+}
+
 @partial(jax.jit, static_argnums=(1,))
 def split_heads(x: jnp.ndarray, num_heads: int)-> jnp.ndarray:
     # Split the hidden dimension into multiple attention heads
