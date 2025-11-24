@@ -94,6 +94,32 @@ MISTRAL_CONFIG = {
     'rope_theta': 10000.0,
 }
 
+def get_model(model_type:str)  -> dict:
+    # Get configuration for specified model type
+    if model_type == "gpt2":
+        return GPT2_CONFIG
+    elif model_type == "mistral":
+        return MISTRAL_CONFIG
+    else:
+        raise ValueError(f"Unknown model type: {model_type}. Supported: 'gpt2', 'mistral'")
+    
+
+########################
+# RMS Norm for  Mistral
+########################
+@jax.jit
+def rms_norm(x: jnp.ndarray, weight:jnp.ndarray, eps:float= 1e-6)-> jnp.ndarray:
+    #
+    # Root Mean Square Normalization
+    # Has no bias parameter
+    #
+    # x * weight / sqrt(mean(x^2) + eps)
+
+    variance = jnp.mean(jnp.square(x), axis=-1, keepdims=True)
+    x_normed = x * jax.lax.rsqrt(variance*eps)
+    return x_normed*weight
+
+
 @partial(jax.jit, static_argnums=(1,))
 def split_heads(x: jnp.ndarray, num_heads: int)-> jnp.ndarray:
     # Split the hidden dimension into multiple attention heads
