@@ -144,6 +144,13 @@ def precompute_rope_frequencies(head_dim:int, max_seq_len:int, theta:float= 1000
 
     return jnp.cos(freqs), jnp.sin(freqs)
 
+@jax.jit
+def rotate_half(x:jnp.ndarray)->jnp.ndarray:
+    # Rotate half the hidden dimensions of x for RoPE
+    x1 = x[..., :x.shape[-1]//2]
+    x2 = x[..., x.shape[-1]//2:]
+    return jnp.concatenate([-x2, x1], axis=-1)
+
 
 @partial(jax.jit, static_argnums=(1,))
 def split_heads(x: jnp.ndarray, num_heads: int)-> jnp.ndarray:
