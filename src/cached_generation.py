@@ -120,6 +120,31 @@ def rms_norm(x: jnp.ndarray, weight:jnp.ndarray, eps:float= 1e-6)-> jnp.ndarray:
     return x_normed*weight
 
 
+##########################################
+#   RoPE (Rotary Position Embeddings)
+##########################################
+
+@partial(jax.jit, static_argnums=(1,2))
+def precompute_rope_frequencies(head_dim:int, max_seq_len:int, theta:float= 10000.0) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    #
+    # Precompute rotary position embedding frequencies
+    # RoPE encodes position information by rotating query/key vectors
+
+    # First compute inverse freq: 1/(theta^(2i/d)) for i in [0, d/2]
+    inv_freq = 1.0 / (theta ** (jnp.arange(0, head_dim, 2, dtype=jnp.float32) / head_dim))
+
+    # Position indices
+    positions = jnp.arange(max_seq_len, dtype=jnp.float32)
+
+    # Outer Product [max_seq_len, head_dim//2]
+    freqs = jnp.outer(positions, inv_freq)
+
+    # Duplicate for pairing [max_seq_len, head_dim]
+    freqs = jnp.concatenate([freqs, freqs], axis=-1)
+
+    return jnp.cos(freqs), jnp.sin(freqs)
+
+
 @partial(jax.jit, static_argnums=(1,))
 def split_heads(x: jnp.ndarray, num_heads: int)-> jnp.ndarray:
     # Split the hidden dimension into multiple attention heads
