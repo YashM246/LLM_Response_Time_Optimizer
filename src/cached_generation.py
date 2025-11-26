@@ -190,6 +190,34 @@ def swiglu(x:jnp.ndarray, gate_proj:jnp.ndarray, up_proj:jnp.ndarray)-> jnp.ndar
 
     return gate*up
 
+
+#############################
+#  Grouped Query Attention
+#############################
+
+@partial(jax.jit, static_argnums=(1,))
+def repeat_kv(hidden_states:jnp.ndarray, n_rep:int )->jnp.ndarray:
+    #
+    # Repeat KV heads to match number of query heads for GQA
+    # In GQA, we have fewer KV heads than Q heads
+    #
+    if n_rep == 1:
+        return hidden_states
+    
+    batch, num_kv_heads, seq_len, head_dim = hidden_states.shape
+
+    # Expand and repeat
+    hidden_states = jnp.expand_dims(hidden_states, axis=2)
+    hidden_states = jnp.repeat(hidden_states, n_rep, axis=2)
+
+    # Reshape: [batch, kv_heads*n_reps, seq, head_dim]
+    return hidden_states.reshape(batch, num_kv_heads*n_rep, seq_len, head_dim)
+
+
+################################
+#       GPT 2 Components
+################################
+
 @partial(jax.jit, static_argnums=(1,))
 def split_heads(x: jnp.ndarray, num_heads: int)-> jnp.ndarray:
     # Split the hidden dimension into multiple attention heads
