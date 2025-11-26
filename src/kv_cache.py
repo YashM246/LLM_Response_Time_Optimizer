@@ -1,3 +1,83 @@
+"""
+KV-Cache Implementation for Transformer Models
+
+This module provides utilities for implementing Key-Value caching in transformer
+attention layers. KV-caching is a critical optimization for autoregressive text
+generation that avoids redundant computation of previous tokens' keys and values.
+
+Performance Impact:
+-------------------
+Without KV-cache: O(n²) computation per token (recompute attention for all positions)
+With KV-cache: O(n) computation per token (only compute for new token)
+
+For a 15-token generation:
+- Non-cached: ~1.5 tok/s (quadratic growth in compute)
+- Cached: ~24 tok/s (linear growth in compute)
+- Speedup: ~16x
+
+Cache Structure:
+----------------
+The cache is a nested dictionary:
+{
+    0: {  # Layer 0
+        'key': [batch, num_kv_heads, max_seq_len, head_dim],
+        'value': [batch, num_kv_heads, max_seq_len, head_dim]
+    },
+    1: {...},  # Layer 1
+    ...
+}
+
+Each layer stores its own key and value tensors, pre-allocated to max_seq_len.
+During generation, we fill positions incrementally and track cache_length.
+
+Grouped-Query Attention (GQA):
+-------------------------------
+For models with GQA (e.g., Mistral), num_kv_heads < num_heads:
+- GPT-2: num_kv_heads = num_heads = 12 (standard multi-head attention)
+- Mistral: num_kv_heads = 8, num_heads = 32 (grouped-query attention)
+
+The cache stores only num_kv_heads. Use repeat_kv() from cached_generation.py
+to expand KV heads to match query heads during attention computation.
+
+JAX Functional Programming:
+---------------------------
+JAX requires functional programming - arrays are immutable. Updates create new
+arrays using jax.lax.dynamic_update_slice rather than in-place modification.
+
+Usage Example:
+--------------
+    from src.kv_cache import initialize_cache, update_cache, get_cached_kv
+
+    # Initialize cache (GPT-2)
+    cache_gpt2 = initialize_cache(
+        num_layers=12,
+        batch_size=1,
+        num_kv_heads=12,  # Same as num_heads for GPT-2
+        max_seq_len=1024,
+        head_dim=64
+    )
+
+    # Initialize cache (Mistral)
+    cache_mistral = initialize_cache(
+        num_layers=32,
+        batch_size=1,
+        num_kv_heads=8,   # Fewer than num_heads (32) for GQA
+        max_seq_len=4096,
+        head_dim=128
+    )
+
+    # During generation loop
+    for pos in range(seq_len):
+        # Compute new K, V for current token
+        new_k, new_v = compute_kv(...)
+
+        # Update cache
+        cache = update_cache(cache, layer_idx, new_k, new_v, pos)
+
+        # Retrieve all cached keys/values for attention
+        cached_k, cached_v = get_cached_kv(cache, layer_idx, pos + 1)
+"""
+
 import jax
 import jax.numpy as jnp
 from typing import Dict, Tuple
@@ -29,8 +109,8 @@ def initialize_cache(num_layers:int,
     
     # Will return a nested dictionary structure
     # {
-    #   0: {'key': jnp.zeros([batch, num_heads, max_seq_len, head_dim]),
-    #       'value': jnp.zeros([batch, num_heads, max_seq_len, head_dim])},
+    #   0: {'key': jnp.zeros([batch, num_kv_heads, max_seq_len, head_dim]),
+    #       'value': jnp.zeros([batch, num_kv_heads, max_seq_len, head_dim])},
     #   1: {...}
     #   ...
     #   Till Layer n
@@ -57,8 +137,8 @@ def update_cache(cache, layer_idx, new_keys, new_values, cache_position):
     Args:
         cache: Current cache dictionary
         layer_idx: Which transformer layer to update
-        new_keys: New key tensor [batch, num_heads, 1, head_dim]
-        new_values: New value tensor [batch, num_heads, 1, head_dim]
+        new_keys: New key tensor [batch, num_kv_heads, 1, head_dim]
+        new_values: New value tensor [batch, num_kv_heads, 1, head_dim]
         cache_position: Position in sequence to insert (0-indexed)
 
     Returns:
@@ -113,12 +193,13 @@ def get_cached_kv(cache: Dict[int, Dict[str, jnp.ndarray]],
 
     Returns:
         Tuple of (keys, values) where each has shape:
-        [batch, num_heads, cache_length, head_dim]
+        [batch, num_kv_heads, cache_length, head_dim]
 
     Example:
         # After generating 10 tokens, retrieve all cached K,V for attention
         cached_k, cached_v = get_cached_kv(cache, layer_idx=0, cache_length=10)
-        # cached_k.shape = [1, 12, 10, 64]
+        # For GPT-2: cached_k.shape = [1, 12, 10, 64]
+        # For Mistral: cached_k.shape = [1, 8, 10, 128]
     """
     # The cache will always be of length max_seq_len
     # But we might've only filled cache_length positions so far
