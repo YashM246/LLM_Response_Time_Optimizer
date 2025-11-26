@@ -176,6 +176,19 @@ def apply_rotary_pos_emb(q: jnp.ndarray,
 
     return q_embed, k_embed
 
+####################
+#    SwiGLU Func
+####################
+
+@jax.jit
+def swiglu(x:jnp.ndarray, gate_proj:jnp.ndarray, up_proj:jnp.ndarray)-> jnp.ndarray:
+    #
+    # Formula: SwiGLU(x) = Swish(x @ gate_proj) * (x @ up_proj)
+    #
+    gate = jax.nn.silu(x@gate_proj)
+    up = x @ up_proj
+
+    return gate*up
 
 @partial(jax.jit, static_argnums=(1,))
 def split_heads(x: jnp.ndarray, num_heads: int)-> jnp.ndarray:
