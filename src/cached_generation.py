@@ -765,7 +765,7 @@ def generate_text_with_cache(params: dict,
         cache = initialize_cache(
             num_layers=config['num_layers'],
             batch_size=batch_size,
-            num_heads=config['num_heads'],
+            num_kv_heads=config['num_kv_heads'],
             max_seq_len=config['max_seq_len'],
             head_dim=config['hidden_dim'] // config['num_heads'],
             dtype=jnp.float16  # Match model parameter dtype
