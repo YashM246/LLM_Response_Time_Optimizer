@@ -697,7 +697,7 @@ class KVCache(NamedTuple):
 def init_kv_cache(
     batch_size: int,
     num_layers: int,
-    num_heads: int,
+    num_kv_heads: int,
     head_dim: int,
     max_seq_len: int
 ) -> dict:

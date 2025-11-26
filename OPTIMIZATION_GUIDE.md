@@ -89,7 +89,7 @@ from src.kv_cache import initialize_cache, update_cache, get_cached_kv
 cache = initialize_cache(
     num_layers=12,
     batch_size=1,
-    num_heads=12,
+    num_kv_heads=12,        # For GPT2 , same as num_heads
     max_seq_len=1024,
     head_dim=64
 )
