@@ -152,6 +152,31 @@ def rotate_half(x:jnp.ndarray)->jnp.ndarray:
     return jnp.concatenate([-x2, x1], axis=-1)
 
 
+@jax.jit
+def apply_rotary_pos_emb(q: jnp.ndarray,
+                         k: jnp.ndarray,
+                         cos: jnp.ndarray,
+                         sin: jnp.ndarray,
+                         position_ids: jnp.ndarray)-> Tuple[jnp.ndarray, jnp.ndarray]:
+    # Apply rotary position embeddings to keys and queries
+    #
+    # x_rot = x*cos(pos) + rotate_half(x) * sin(pos)
+    #
+    
+    cos_pos = cos[position_ids]
+    sin_pos = sin[position_ids]
+
+    # Reshape to broadcast
+    cos_pos = cos_pos[:, None, :, :]
+    sin_pos = sin_pos[:, None, :, :]
+
+    # Apply rotation
+    q_embed = (q*cos_pos) + (rotate_half(q)*sin_pos)
+    k_embed = (k*cos_pos) + (rotate_half(k)*sin_pos)
+
+    return q_embed, k_embed
+
+
 @partial(jax.jit, static_argnums=(1,))
 def split_heads(x: jnp.ndarray, num_heads: int)-> jnp.ndarray:
     # Split the hidden dimension into multiple attention heads
