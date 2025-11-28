@@ -141,72 +141,34 @@ def build_flax_pytree(jax_state_dict: Dict[str, jnp.ndarray])-> Dict[str, Any]:
     
     print(f"[OK] Built PyTree with {len(jax_state_dict)} parameters")
     return pytree
-
-def load_flax_model_with_params(params:Dict[str,Any],
-                                model_name:str="mistralai/Mistral-7B-Instruct-v0.2")-> tuple:
-    # Initialize Flax model with converted parameters
-    # Args:
-    #           params: Flax PyTree parameters
-    #           model_name: Model Identifier (For config)
-    # Returns:
-    #           model: Flax model architecture
-    #           params: Model Parameters (wrapped in proper structure)
-
-    from transformers import FlaxGPT2LMHeadModel
-
-    # Load pre-trained Flax model (we'll replace its params with ours)
-    print(f"Loading Flax model from {model_name}...")
-    model = FlaxGPT2LMHeadModel.from_pretrained(model_name, from_pt=False)
-
-    # Wrap params in the structure Flax expects
-    # Flax models expect: {'params': {actual_params}}
-    wrapped_params = {'params': params}
-
-    print("[OK] Flax model loaded")
-
-    return model, wrapped_params
     
 
-def convert_model(model_name:str="mistralai/Mistral-7B-Instruct-v0.2", use_small_model:bool=False):
+def convert_model(model_type: str= "gpt2"):
     # Main Conversion Pipeline
     # PyTorch -> JAX/Flax
     #
     # Returns:
-    #           model: FlaxMistralForCausalLM
+    #           params: Model parameters (PyTree wrapped in {'params': ...})
     #           tokenizer: Tokenizer
-    #           params: Model parameters (PyTree)
+    #           model_type: The model type
 
     print("\n" + "=" * 60)
-    print("Starting PyTorch -> JAX/Flax Conversion Pipeline")
+    print(f"PyTorch -> JAX Conversion Pipeline ({model_type.upper()})")
     print("=" * 60)
     
-    print("\n[1/5] Loading PyTorch model...")
-    pytorch_state_dict, tokenizer = load_pytorch_model(model_name, use_small_model)
-    print(f"    [OK] Loaded {len(pytorch_state_dict)} parameters")
+    print("\n[1/4] Loading PyTorch model...")
+    pytorch_state_dict, tokenizer = load_pytorch_model(model_type)
     
-    print("\n[2/5] Converting to JAX arrays...")
+    print("\n[2/4] Converting to JAX arrays...")
     jax_state_dict = convert_pytorch_to_jax(pytorch_state_dict)
     
-    print("\n[3/5] Building Flax PyTree...")
-    params = build_flax_pytree(jax_state_dict)
+    print("\n[3/4] Building Flax PyTree...")
+    params_tree = build_flax_pytree(jax_state_dict)
     
-    print("\n[4/5] Initializing Flax model...")
-    if use_small_model:
-        model, params = load_flax_model_with_params(params, "gpt2")
-    else:
-        # For Mistral, skip Flax model wrapper (use params directly)
-        print("WARNING: Skipping Flax model wrapper for Mistral")
-        print("    (FlaxMistralForCausalLM not fully supported yet)")
-        print("    Converted parameters are ready for direct use!")
-        
-        # Wrap params in the structure Flax expects
-        wrapped_params = {'params': params}
-        model = None  # No model wrapper, just use params directly
-        params = wrapped_params
-        
-        print("[OK] Parameters prepared successfully")
+    print("\n[4/4] Wrapping parameters...")
+    params = {'params': params_tree} 
     
-    print("\n[5/5] Conversion complete!")
+    print("\n[OK] Conversion complete!")
     print("=" * 60)
     
-    return model, params, tokenizer
+    return params, tokenizer, model_type
