@@ -376,6 +376,12 @@ def cached_attention(hidden_states: jnp.ndarray,    # [batch, 1, hiddem_dim]
                      cache: dict,
                      layer_idx: int,
                      position: int,
+                     config: dict,
+                     q_proj: jnp.ndarray= None,
+                     k_proj: jnp.ndarray= None,
+                     v_proj: jnp.ndarray= None,
+                     rope_cos: jnp.ndarray= None,
+                     rope_sin: jnp.ndarray= None,
                      use_cache: bool=True) -> Tuple[jnp.ndarray, dict]:
     # Multi-headed Attention with KV-Caching
     #
@@ -398,10 +404,20 @@ def cached_attention(hidden_states: jnp.ndarray,    # [batch, 1, hiddem_dim]
     head_dim = hidden_dim//num_heads
 
     # Step 1: Compute Q, K, V for New positions only
-    Q, K_new, V_new = compute_qkv(hidden_states, attn_weights, attn_bias, num_heads)
-    # Q: [batch, num_heads, 1, head_dim]
-    # K_new: [batch, num_heads, 1, head_dim]
-    # V_new: [batch, num_heads, 1, head_dim]
+    model_type = config.get("model_type", "gpt2")
+
+    if model_type == 'mistral':
+        # Mistral: Separate Projections + RoPE
+        batch_size, seq_len, hidden_dim = hidden_states.shape
+        position_ids = jnp.arange(position, position + seq_len).reshape(1, seq_len)
+
+        Q, K_new, V_new = compute_qkv_mistral(hidden_states, q_proj, k_proj, v_proj,
+                                              num_heads, config['num_kv_heads'],
+                                              position_ids, rope_cos, rope_sin)
+        
+    else:
+        # GPT2: Combined QKV projection
+        Q, K_new, V_new = compute_qkv(hidden_states, attn_weights, attn_bias, num_heads)
 
     if position>0:
         # Step 2: Update cache with new K, V
@@ -421,14 +437,20 @@ def cached_attention(hidden_states: jnp.ndarray,    # [batch, 1, hiddem_dim]
         K_all = K_new
         V_all = V_new
 
-    # Step 4: Compute attention scores
+    # Step 4: Expand KV Heads for GQA (if Mistral)
+    if model_type == "mistral":
+        n_rep = num_heads // config["num_kv_heads"]
+        K_all = repeat_kv(K_all, n_rep)
+        V_all = repeat_kv(V_all, n_rep)
+
+    # Step 5: Compute attention scores
     # Q: [batch, num_heads, 1, head_dim]
     # K_all: [batch, num_heads, position+1, head_dim]
     # scores: [batch, num_heads, 1, position+1]
     scores = jnp.matmul(Q, jnp.transpose(K_all, (0, 1, 3, 2)))
     scores = scores/jnp.sqrt(head_dim)
 
-    # Step 5: Apply Causal mask (optional, but good practice)
+    # Step 6: Apply Causal mask (optional, but good practice)
     # Since we only attend to past positions, mask is already satisfied
     # But add it for correctness
     _, _, query_len, _ = Q.shape
@@ -447,16 +469,16 @@ def cached_attention(hidden_states: jnp.ndarray,    # [batch, 1, hiddem_dim]
 
     scores = scores + mask
 
-    # Step 6: Softmax
+    # Step 7: Softmax
     attn_weights = jax.nn.softmax(scores, axis=-1)
 
-    # Step 7: Attention Output
+    # Step 8: Attention Output
     # attn_weights: [batch, num_heads, 1, position+1]
     # V_all: [batch, num_heads, position+1, head_dim]
     # output: [batch, num_heads, 1, head_dim]
     output = jnp.matmul(attn_weights, V_all)
 
-    # Step 8: Merge Heads back
+    # Step 9: Merge Heads back
     output = merge_heads(output)
 
     return output, cache
