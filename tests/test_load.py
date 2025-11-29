@@ -10,17 +10,18 @@ if __name__ == "__main__":
     
     try:
         # Run full conversion
-        model, params, tokenizer = convert_model(use_small_model=True)
+        params, tokenizer, model_type = convert_model(model_type="gpt2")
         
         print("\n" + "=" * 60)
         print("Conversion Summary")
         print("=" * 60)
-        print(f"✓ Model type: {type(model).__name__}")
+        print(f"✓ Model type: {model_type}")
         print(f"✓ Tokenizer vocab size: {len(tokenizer)}")
         print(f"✓ Top-level param keys: {list(params.keys())}")
         
-        # Try to inspect model structure
-        print(f"✓ Model config: {model.config.to_dict()}")
+        # Inspect parameter structure
+        if 'params' in params:
+            print(f"✓ Nested param keys: {list(params['params'].keys())}")
         
         print("\n" + "=" * 60)
         print("✓ Full conversion pipeline successful!")
