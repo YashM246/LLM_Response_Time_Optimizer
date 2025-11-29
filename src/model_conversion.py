@@ -159,7 +159,7 @@ def convert_model(model_type: str= "gpt2"):
     print("=" * 60)
     
     print("\n[1/4] Loading PyTorch model...")
-    pytorch_state_dict, tokenizer = load_pytorch_model(model_type)
+    pytorch_state_dict, tokenizer, model_type = load_pytorch_model(model_type)
     
     print("\n[2/4] Converting to JAX arrays...")
     jax_state_dict = convert_pytorch_to_jax(pytorch_state_dict)
