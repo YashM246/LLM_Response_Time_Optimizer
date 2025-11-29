@@ -296,6 +296,59 @@ def compute_qkv(hidden_states: jnp.ndarray,
 
     return Q, K, V
 
+
+def compute_qkv_mistral(hidden_states: jnp.ndarray,
+                        q_proj: jnp.ndarray,
+                        k_proj: jnp.ndarray,
+                        v_proj: jnp.ndarray,
+                        num_heads: int,
+                        num_kv_heads: int,
+                        position_ids: jnp.ndarray,
+                        cos: jnp.ndarray,
+                        sin: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    #
+    # Compute Q, K, V for Mistral with RoPE and GQA
+    #
+    # Args:
+    #           hidden_states: Input [batch, seq_len, hidden_dim]
+    #           q_proj: Query projection weights [hidden_dim, num_heads*head_dim]
+    #           k_proj: Key Projection weights [hidden_dim, num_kv_heads*head_dim]
+    #           v_proj: Value Projection weights [hidden_dim, num_kv_heads*head_dim]
+    #           num_heads: Number of query heads (32 for Mistral)
+    #           num_kv_heads: Number of KV heads (8 for Mistral, for GQA)
+    #           position_ids: Position indices [batch, seq_len]
+    #           cos: Precomputed RoPE cosines [max_seq_len, head_dim]
+    #           sin: Precomputed RoPE sines [max_seq_len, head_dim]
+    #
+    # Returns:
+    #           Q: Query [batch, num_heads, seq_len, head_dim]
+    #           K: Key [batch, num_kv_heads, seq_len, head_dim]
+    #           V: Value [batch, num_kv_heads, seq_len, head_dim]
+
+    batch_size, seq_len, hidden_dim = hidden_states.shape
+    head_dim = hidden_dim // num_heads
+
+    # Separate projections (no bias in Mistral)
+    Q = hidden_states @ q_proj
+    K = hidden_states @ k_proj
+    V = hidden_states @ v_proj
+
+    # Reshape to separate heads
+    Q = Q.reshape(batch_size, seq_len, num_heads, head_dim)
+    K = K.reshape(batch_size, seq_len, num_kv_heads, head_dim)
+    V = V.reshape(batch_size, seq_len, num_kv_heads, head_dim)
+
+    # Transpose to [batch, num_heads, seq_len, head_dim]
+    Q = jnp.transpose(Q, (0, 2, 1, 3))
+    K = jnp.transpose(K, (0, 2, 1, 3))
+    V = jnp.transpose(V, (0, 2, 1, 3))
+
+    # Apply RoPE to Q and K
+    Q, K = apply_rotary_pos_emb(Q, K, cos, sin, position_ids)
+
+    return Q, K, V
+
+
 @partial(jax.jit, static_argnums=(0,))
 def causal_mask(seq_len:int)-> jnp.ndarray:
     # Create causal attention mask (lower triangle)
