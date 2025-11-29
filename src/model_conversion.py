@@ -1,12 +1,14 @@
 """
-Manual PyTorch to JAX/Flax model conversion for Mistral-7B.
+PyTorch to JAX/Flax model conversion for GPT-2 and Mistral-7B.
 
 This module handles:
-1. Loading PyTorch checkpoint
+1. Loading PyTorch checkpoint (GPT2 or Mistral 7B)
 2. Mapping weight tensors to JAX arrays
-3. Transposing linear layer weights (PyTorch vs Flax convention)
+3. Transposing linear layer weights (PyTorch [out, in] -> JAX [in, out])
 4. Building Flax PyTree structure
-5. Initializing FlaxMistralForCausalLM with converted weights
+5. Returning parameters ready for custom forward pass
+
+Supports both GPT-2 and Mistral-7B architectures.
 
 """
 
