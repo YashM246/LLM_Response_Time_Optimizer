@@ -649,6 +649,9 @@ def transformer_layer(hidden_states: jnp.ndarray,
                      layer_idx: int,
                      position: int,
                      num_heads: int,
+                     config: dict,
+                     rope_cos: jnp.ndarray= None,
+                     rope_sin: jnp.ndarray= None,
                      use_cache: bool = True,
                      model_type: str = "gpt2")-> Tuple[jnp.ndarray, dict]:
     # Complete transfomer later with cached attention
@@ -687,6 +690,7 @@ def transformer_layer(hidden_states: jnp.ndarray,
                                                   cache=cache,
                                                   layer_idx=layer_idx,
                                                   position=position,
+                                                  config = config,
                                                   use_cache=use_cache)
         else:
             # Batch processing without cache (all tokens at once)
@@ -716,8 +720,55 @@ def transformer_layer(hidden_states: jnp.ndarray,
         # 7) Residual connection
         output = hidden_states + mlp_output
 
+    elif model_type == "mistral":
+        # 1) Pre-attention RMSNorm
+        input_layernorm_weight = layer_params['input_layernorm']['kernel']
+        normed = rms_norm(hidden_states, input_layernorm_weight)
+
+        # 2) Attention with separate Q/K/V projections + RoPE
+        q_proj = layer_params['self_attn']['q_proj']['kernel']
+        k_proj = layer_params['self_attn']['k_proj']['kernel']
+        v_proj = layer_params['self_attn']['v_proj']['kernel']
+
+        if use_cache:
+            attn_output, cache = cached_attention(hidden_states=normed,
+                                                  attn_weights=None,    # Not used for Mistral
+                                                  attn_bias= None,       # Not used for Mistral
+                                                  num_heads= num_heads,
+                                                  cache = cache,
+                                                  layer_idx= layer_idx,
+                                                  position= position,
+                                                  config= config,
+                                                  q_proj= q_proj,
+                                                  k_proj= k_proj,
+                                                  v_proj= v_proj,
+                                                  rope_cos= rope_cos,
+                                                  rope_sin= rope_sin,
+                                                  use_cache= use_cache
+                                                  )
+            
+        else:
+            raise NotImplementedError("Batch Attention for Mistral not yet implemented")
+        
+        # 3) Attention output projection
+        o_proj = layer_params['self_attn']['o_proj']['kernel']
+        attn_output = attn_output @ o_proj
+
+        # 4) Residual connection
+        hidden_states = hidden_states + attn_output
+
+        # 5) Pre-MLP RMSNorm
+        post_attention_layernorm_weight = layer_params['post_attention_layernorm']['kernel']
+        normed = rms_norm(hidden_states, post_attention_layernorm_weight)
+
+        # 6) MLP with SwiGLU
+        mlp_output = mlp(normed, layer_params['mlp'], model_type)
+
+        # 7) Residual connection
+        output = hidden_states + mlp_output
+
     else:
-        raise NotImplementedError("Mistral transformer layer not yet implemented")
+        raise ValueError(f"Unknown model_type: {model_type}")
     
     return output, cache
 
