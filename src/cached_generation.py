@@ -620,9 +620,26 @@ def mlp(x: jnp.ndarray,
 
         output = hidden @ c_proj_weight + c_proj_bias
     
+    elif model_type == "mistral":
+        # Mistral: SwiGLU activation
+        # Structure:
+        #       1) gate_proj: hidden_dim -> intermediate_dim
+        #       2) up_proj: hidden_dim -> intermediate_dim
+        #       3) SwiGLU: gate * SiLU(up)
+        #       4) down_proj: intermediate_dim -> hidden_dim
+
+        gate_proj_weight = mlp_params['gate_proj']['kernel']
+        up_proj_weight = mlp_params['up_proj']['kernel']
+        down_proj_weight = mlp_params['down_proj']['kernel']
+
+        # SwiGLU activation (no bias in Mistral)
+        hidden = swiglu(x, gate_proj_weight, up_proj_weight)
+
+        # Down Projection
+        output = hidden @ down_proj_weight
+    
     else:
-        # Mistral uses different naming and SwiGLU
-        raise NotImplementedError("Mistral MLP not yet implemented")
+        raise ValueError(f"Unknown model_type: {model_type}")
     
     return output
 
