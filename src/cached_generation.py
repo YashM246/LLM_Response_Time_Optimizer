@@ -885,15 +885,12 @@ def generate_text_with_cache(params: dict,
     
     # Model config
     if model_type == "gpt2":
-        config = {
-            'num_layers': 12,
-            'num_heads': 12,
-            'hidden_dim': 768,
-            'max_seq_len': 1024,
-            'vocab_size': 50257
-        }
+        config = get_model("gpt2")  # Uses the GPT2_CONFIG defined earlier
+    elif model_type == "mistral":
+        config = get_model("mistral")  # Uses the MISTRAL_CONFIG defined earlier
     else:
-        raise NotImplementedError("Mistral config not yet defined")
+        raise ValueError(f"Unknown model_type: {model_type}")
+
     
     # Encode prompt
     input_ids = tokenizer.encode(prompt, return_tensors='np')
@@ -915,6 +912,16 @@ def generate_text_with_cache(params: dict,
         )
     else:
         cache = None
+
+    # Precompute RoPE frequencies for Mistral
+    if model_type == "mistral":
+        rope_cos, rope_sin = precompute_rope_frequencies(
+            head_dim=config['head_dim'],
+            max_seq_len=config['max_seq_len'],
+            theta=config['rope_theta']
+        )
+    else:
+        rope_cos, rope_sin = None, None
 
     # Track generated tokens
     generated_ids = input_ids.tolist()[0]  # Start with prompt tokens
@@ -945,6 +952,9 @@ def generate_text_with_cache(params: dict,
                     layer_idx=layer_idx,
                     position=pos,
                     num_heads=config['num_heads'],
+                    config=config,
+                    rope_cos=rope_cos,
+                    rope_sin=rope_sin,
                     use_cache=use_cache,
                     model_type=model_type
                 )
@@ -971,6 +981,9 @@ def generate_text_with_cache(params: dict,
                 layer_idx=layer_idx,
                 position=0,  # Not used in batch mode
                 num_heads=config['num_heads'],
+                config=config,
+                rope_cos=rope_cos,
+                rope_sin=rope_sin,
                 use_cache=False,
                 model_type=model_type
             )
@@ -1019,6 +1032,9 @@ def generate_text_with_cache(params: dict,
                     layer_idx=layer_idx,
                     position=current_pos,
                     num_heads=config['num_heads'],
+                    config=config,
+                    rope_cos=rope_cos,
+                    rope_sin=rope_sin,
                     use_cache=True,
                     model_type=model_type
                 )
