@@ -116,7 +116,7 @@ def rms_norm(x: jnp.ndarray, weight:jnp.ndarray, eps:float= 1e-6)-> jnp.ndarray:
     # x * weight / sqrt(mean(x^2) + eps)
 
     variance = jnp.mean(jnp.square(x), axis=-1, keepdims=True)
-    x_normed = x * jax.lax.rsqrt(variance*eps)
+    x_normed = x * jax.lax.rsqrt(variance + eps)
     return x_normed*weight
 
 
