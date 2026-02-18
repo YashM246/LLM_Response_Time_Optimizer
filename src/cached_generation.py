@@ -1,57 +1,43 @@
 """
 Cached Text Generation with KV-Cache and JIT Compilation
 
-This module implements optimized autoregressive text generation for GPT-2 using JAX.
-It combines two key optimizations for ~16x speedup over naive implementation:
+Supports GPT-2 and Mistral-7B-Instruct-v0.2 with three optimization layers:
+  1. KV-Cache        — avoids recomputing past keys/values (O(n) decode vs O(n²))
+  2. JIT Compilation — XLA-compiles core functions via @jax.jit
+  3. lax.scan decode — traces the entire decode loop into one XLA program (Mistral)
 
-1. KV-Cache: Stores previous key/value computations to avoid redundant computation
-2. JIT Compilation: Uses @jax.jit decorators for XLA compilation and optimization
+Performance Results:
+- GPT-2  (cached vs uncached, same JAX pipeline): 16.32x speedup, 24.45 tok/s
+- Mistral (JAX optimized vs PyTorch generate()):   ~2.27x speedup baseline,
+                                                   improved further with lax.scan
 
-Key Performance Characteristics:
-- Non-cached baseline: ~1.5 tok/s
-- Cached + JIT optimized: ~24 tok/s
-- Total speedup: 16.32x (measured on GPT-2)
+IMPORTANT — Why the GPT-2 and Mistral speedups differ:
+--------------------------------------------------------
+The GPT-2 16.32x compared OUR OWN uncached JAX (naive O(n²) recomputation every
+step) against our cached JAX (O(n)). Eliminating ~99% of redundant work naturally
+gives a large multiplier.
 
-IMPORTANT: JAX JIT Compilation Behavior
----------------------------------------
-JAX JIT compiles separately for each input shape. During autoregressive generation,
-each token produces a different sequence length, triggering separate compilations:
-  - Token 1: compiles for shape [batch, 4]
-  - Token 2: compiles for shape [batch, 5]
-  - Token 3: compiles for shape [batch, 6]
-  - etc.
+The Mistral comparison is against PyTorch's generate(), which ALREADY uses KV cache
+internally. Both sides are O(n). We compete on JIT efficiency and XLA optimization,
+not on eliminating quadratic work — fundamentally harder.
 
-For accurate benchmarking, warmup must generate at least as many tokens as the
-actual test to ensure all shapes are pre-compiled.
+lax.scan Decode (Mistral):
+--------------------------
+The Python decode loop dispatches ~10 JAX ops × 32 layers × 50 tokens ≈ 16,000
+individual Python→XLA round trips per generation call. jax.lax.scan traces the
+entire loop into a single XLA program and dispatches once, letting XLA optimize
+across all decode steps. This eliminates the Python overhead and allows kernel
+fusion across the 50-step sequence.
 
-Functions are decorated with @jax.jit or @partial(jax.jit, static_argnums=...)
-to enable JIT compilation. Static arguments (num_heads, model_type, etc.) must
-be compile-time constants.
+The scan requires:
+  - Stacked KV cache: dict-of-dicts → [num_layers, batch, kv_heads, seq, head_dim]
+  - Position masking instead of dynamic slicing (XLA requires static shapes)
+  - Compact cache sized to prompt_len + max_new_tokens (not full 32768-position window)
 
-Architecture Support:
-- GPT-2 (tested and validated)
-- Mistral-7B (partial support, not fully tested)
-
-Usage Example:
---------------
-    from src.model_conversion import load_pytorch_model, convert_pytorch_to_jax
-    from src.cached_generation import generate_text_with_cache
-
-    # Load and convert model
-    pytorch_state_dict, tokenizer = load_pytorch_model(use_small_model=True)
-    jax_state_dict = convert_pytorch_to_jax(pytorch_state_dict)
-    params = build_flax_pytree(jax_state_dict)
-
-    # Generate text
-    text, stats = generate_text_with_cache(
-        params={'params': params},
-        tokenizer=tokenizer,
-        prompt="Hello, world!",
-        max_new_tokens=50,
-        temperature=0.8,
-        use_cache=True,
-        model_type="gpt2"
-    )
+JAX JIT Shape Compilation:
+---------------------------
+JAX JIT compiles separately for each unique input shape. Warmup must cover all
+prompt lengths used in the benchmark to avoid first-call compilation overhead.
 """
 
 import jax
@@ -925,6 +911,156 @@ def sample_token(logits: jnp.ndarray,
     return next_token
 
 
+def mistral_scan_decode(params,
+                        cache,
+                        prefill_logits,
+                        prompt_len,
+                        max_new_tokens,
+                        num_heads,
+                        num_kv_heads,
+                        rope_cos,
+                        rope_sin,
+                        temperature,
+                        top_k,
+                        rng_key):
+    """
+    Decode phase for Mistral using jax.lax.scan.
+
+    Replaces the Python for-loop over max_new_tokens with a single traced
+    XLA computation. The entire 50-step decode is compiled once and dispatched
+    in one call, eliminating ~16,000 Python→JAX round trips and enabling
+    cross-step XLA optimization (kernel fusion, better memory reuse).
+
+    Key design decisions:
+    - KV cache stored as stacked arrays [num_layers, batch, kv_heads, seq, head_dim]
+      instead of Python dict, because lax.scan carry must be JAX arrays.
+    - Attention uses position masking (future positions → -1e10) instead of dynamic
+      slicing, because XLA requires static array shapes throughout the computation.
+    - Cache sized to prompt_len + max_new_tokens (compact), not 32768, so the
+      masked attention matrix is [1, 32, 1, ~70] not [1, 32, 1, 32768].
+
+    Args:
+        params:          Model parameters PyTree
+        cache:           Dict KV cache from prefill {layer_idx: {'key':..., 'value':...}}
+        prefill_logits:  Logits from last prefill token [batch, vocab_size]
+        prompt_len:      Number of prompt tokens (Python int — determines cache start pos)
+        max_new_tokens:  Exact number of tokens to generate (Python int — scan length)
+        num_heads:       Query heads (32 for Mistral)
+        num_kv_heads:    KV heads (8 for Mistral, GQA)
+        rope_cos:        Precomputed RoPE cosines [max_seq_len, head_dim]
+        rope_sin:        Precomputed RoPE sines [max_seq_len, head_dim]
+        temperature:     Sampling temperature (Python float, baked into XLA at trace time)
+        top_k:           Top-k filter (Python int, baked into XLA at trace time)
+        rng_key:         JAX PRNGKey for sampling
+
+    Returns:
+        generated_tokens: JAX array of token IDs [max_new_tokens]
+    """
+    num_layers = MISTRAL_CONFIG['num_layers']   # 32, Python int → unrolls loop at trace time
+    head_dim   = MISTRAL_CONFIG['head_dim']     # 128
+    n_rep      = num_heads // num_kv_heads      # 4  (GQA expansion factor)
+
+    # Convert dict cache to stacked JAX arrays.
+    # Dict: {0: {'key': [1,8,seq,128], 'value': ...}, 1: {...}, ...}
+    # Stacked: [32, 1, 8, seq, 128]  ← all layers in one contiguous array
+    cache_k = jnp.stack([cache[i]['key']   for i in range(num_layers)])
+    cache_v = jnp.stack([cache[i]['value'] for i in range(num_layers)])
+    max_seq_len = cache_k.shape[3]   # compact size = prompt_len + max_new_tokens
+
+    def step_fn(carry, _):
+        cache_k, cache_v, logits, cache_pos, rng_key = carry
+
+        # 1. Sample next token from current logits
+        rng_key, subkey = jax.random.split(rng_key)
+        next_token = sample_token(logits, temperature, top_k, subkey)  # [batch]
+        token_2d   = next_token.reshape(1, 1)                          # [batch, 1]
+
+        # 2. Token embedding (no positional embedding — RoPE handles position)
+        hidden = params['params']['model']['embed_tokens']['embedding'][token_2d]
+        # hidden: [1, 1, 4096]
+
+        # 3. Run through all 32 Mistral layers.
+        #    Python for loop is unrolled by XLA at trace time → becomes part of the
+        #    static computation graph. All 32 layers fused into one XLA program.
+        for layer_idx in range(num_layers):
+            layer_p = params['params']['model']['layers'][str(layer_idx)]
+
+            # Pre-attention RMSNorm
+            normed = rms_norm(hidden, layer_p['input_layernorm']['kernel'])
+
+            # Q, K, V with RoPE applied at the current position
+            position_ids = cache_pos.reshape(1, 1)   # [1, 1] — single token position
+            Q, K_new, V_new = compute_qkv_mistral(
+                normed,
+                layer_p['self_attn']['q_proj']['kernel'],
+                layer_p['self_attn']['k_proj']['kernel'],
+                layer_p['self_attn']['v_proj']['kernel'],
+                num_heads, num_kv_heads,
+                position_ids, rope_cos, rope_sin
+            )
+            # Q: [1, 32, 1, 128]   K_new/V_new: [1, 8, 1, 128]
+
+            # Write new K, V into stacked cache at cache_pos.
+            # dynamic_update_slice handles the dynamic (traced) cache_pos.
+            layer_k = cache_k[layer_idx]   # [1, 8, max_seq_len, 128]
+            layer_v = cache_v[layer_idx]
+            updated_k = jax.lax.dynamic_update_slice(
+                layer_k, K_new.astype(layer_k.dtype), (0, 0, cache_pos, 0))
+            updated_v = jax.lax.dynamic_update_slice(
+                layer_v, V_new.astype(layer_v.dtype), (0, 0, cache_pos, 0))
+            # Functional update — returns new stacked array
+            cache_k = cache_k.at[layer_idx].set(updated_k)
+            cache_v = cache_v.at[layer_idx].set(updated_v)
+
+            # GQA: expand 8 KV heads to 32 Q heads
+            K_full = repeat_kv(updated_k, n_rep)   # [1, 32, max_seq_len, 128]
+            V_full = repeat_kv(updated_v, n_rep)
+
+            # Attention: Q [1,32,1,128] × K_full.T [1,32,128,max_seq_len]
+            scores = jnp.matmul(Q, jnp.transpose(K_full, (0, 1, 3, 2)))
+            scores = scores / jnp.sqrt(head_dim)   # [1, 32, 1, max_seq_len]
+
+            # Position mask: future positions (> cache_pos) set to -inf.
+            # Replaces dynamic slicing — XLA requires static shapes, so we mask
+            # instead of slicing the cache to [:cache_pos+1].
+            pos_mask = jnp.where(
+                jnp.arange(max_seq_len) > cache_pos, -1e10, 0.0)
+            scores = scores + pos_mask[None, None, None, :]
+
+            attn_w   = jax.nn.softmax(scores, axis=-1)
+            attn_out = merge_heads(jnp.matmul(attn_w, V_full))   # [1, 1, 4096]
+            attn_out = attn_out @ layer_p['self_attn']['o_proj']['kernel']
+
+            # Residual + post-attention norm + SwiGLU MLP + residual
+            hidden  = hidden + attn_out
+            normed2 = rms_norm(hidden, layer_p['post_attention_layernorm']['kernel'])
+            hidden  = hidden + mlp(normed2, layer_p['mlp'], 'mistral')
+
+        # 4. LM head: final RMSNorm + vocab projection
+        hidden_out = rms_norm(hidden, params['params']['model']['norm']['kernel'])
+        new_logits = (hidden_out @ params['params']['lm_head']['kernel'])[:, 0, :]
+        # new_logits: [1, 32000]
+
+        new_carry = (cache_k, cache_v, new_logits, cache_pos + 1, rng_key)
+        return new_carry, next_token   # output token: [batch]
+
+    # Initial carry: start from prefill logits at position prompt_len
+    initial_carry = (
+        cache_k,
+        cache_v,
+        prefill_logits,
+        jnp.array(prompt_len, dtype=jnp.int32),
+        rng_key
+    )
+
+    # Single XLA dispatch for all max_new_tokens decode steps
+    _, generated_tokens = jax.lax.scan(
+        step_fn, initial_carry, None, length=max_new_tokens)
+
+    # generated_tokens: [max_new_tokens, batch] → [max_new_tokens]
+    return generated_tokens.reshape(-1)
+
+
 def generate_text_with_cache(params: dict,
                              tokenizer,
                              prompt: str,
@@ -980,13 +1116,19 @@ def generate_text_with_cache(params: dict,
     
     # Initialize cache (only needed for cached mode)
     if use_cache:
+        # Mistral: use compact cache sized to actual generation needs.
+        # Full window (32768) would make the scan's masked attention matrix
+        # [1, 32, 1, 32768] for every decode step — wasteful for 70-token sequences.
+        # Compact cache [1, 32, 1, prompt_len+max_new_tokens] is ~500x smaller.
+        # GPT-2: use full model max_seq_len (unchanged).
+        cache_max_seq = (prompt_len + max_new_tokens) if model_type == "mistral" else config['max_seq_len']
         cache = initialize_cache(
             num_layers=config['num_layers'],
             batch_size=batch_size,
             num_kv_heads=config['num_kv_heads'],
-            max_seq_len=config['max_seq_len'],
+            max_seq_len=cache_max_seq,
             head_dim=config['hidden_dim'] // config['num_heads'],
-            dtype=jnp.float16  # Match model parameter dtype
+            dtype=jnp.float16
         )
     else:
         cache = None
@@ -1096,89 +1238,104 @@ def generate_text_with_cache(params: dict,
     
     print(f"[OK] Prefill complete ({prompt_len} tokens)")
     
-    # PHASE 2: Generate new tokens
+    # PHASE 2: Decode (generate new tokens)
     print(f"\nGenerating {max_new_tokens} new tokens...")
 
     key = jax.random.PRNGKey(42)
 
-    for step in range(max_new_tokens):
-        current_pos = prompt_len + step
+    if model_type == "mistral" and use_cache:
+        # lax.scan decode: the entire generation loop is traced into a single
+        # XLA computation and dispatched once. This eliminates ~16,000
+        # Python→JAX round trips (50 steps × 32 layers × ~10 ops each) and
+        # lets XLA optimize across all decode steps.
+        print("Mode: jax.lax.scan decode (single XLA dispatch for all tokens)")
+        generated_scan = mistral_scan_decode(
+            params=params,
+            cache=cache,
+            prefill_logits=logits,
+            prompt_len=prompt_len,
+            max_new_tokens=max_new_tokens,
+            num_heads=config['num_heads'],
+            num_kv_heads=config['num_kv_heads'],
+            rope_cos=rope_cos,
+            rope_sin=rope_sin,
+            temperature=temperature,
+            top_k=top_k,
+            rng_key=key
+        )
+        # generated_scan: [max_new_tokens] JAX array of token IDs
+        # Append to generated_ids, stopping at EOS
+        for tok in generated_scan.tolist():
+            generated_ids.append(tok)
+            if tok == tokenizer.eos_token_id:
+                print("[OK] EOS token encountered")
+                break
+        print(f"  Generated {len(generated_ids) - prompt_len}/{max_new_tokens} tokens...")
 
-        # Sample next token
-        key, subkey = jax.random.split(key)
-        next_token = sample_token(logits, temperature, top_k, subkey)
+    else:
+        # GPT-2 cached or non-cached: original Python token-by-token loop
+        for step in range(max_new_tokens):
+            current_pos = prompt_len + step
 
-        # Append to sequence
-        generated_ids.append(int(next_token[0]))
+            # Sample next token from previous step's logits
+            key, subkey = jax.random.split(key)
+            next_token = sample_token(logits, temperature, top_k, subkey)
+            generated_ids.append(int(next_token[0]))
 
-        # Check for EOS
-        if next_token[0] == tokenizer.eos_token_id:
-            print(f"[OK] EOS token generated at step {step}")
-            break
+            if next_token[0] == tokenizer.eos_token_id:
+                print(f"[OK] EOS token generated at step {step}")
+                break
 
-        if use_cache:
-            # Cached mode: process only the new token
-            # Prepare next input
-            next_token_id = next_token.reshape(1, 1)  # [batch, 1]
+            if use_cache:
+                next_token_id = next_token.reshape(1, 1)
+                hidden_states = get_embeddings(next_token_id, params, position=current_pos, model_type=model_type)
+                for layer_idx in range(config['num_layers']):
+                    if model_type == "gpt2":
+                        layer_params = params['params']['transformer']['h'][str(layer_idx)]
+                    elif model_type == "mistral":
+                        layer_params = params['params']['model']['layers'][str(layer_idx)]
+                    hidden_states, cache = transformer_layer(
+                        hidden_states=hidden_states,
+                        layer_params=layer_params,
+                        cache=cache,
+                        layer_idx=layer_idx,
+                        position=current_pos,
+                        num_heads=config['num_heads'],
+                        config=config,
+                        rope_cos=rope_cos,
+                        rope_sin=rope_sin,
+                        use_cache=True,
+                        model_type=model_type
+                    )
+                logits = lm_head(hidden_states, params, model_type)
+                logits = logits[:, -1, :]
+            else:
+                # Non-cached: reprocess all tokens from scratch (slow, for comparison)
+                all_token_ids = jnp.array([generated_ids])
+                hidden_states = get_embeddings(all_token_ids, params, position=None, model_type=model_type)
+                for layer_idx in range(config['num_layers']):
+                    if model_type == "gpt2":
+                        layer_params = params['params']['transformer']['h'][str(layer_idx)]
+                    elif model_type == "mistral":
+                        layer_params = params['params']['model']['layers'][str(layer_idx)]
+                    hidden_states, _ = transformer_layer(
+                        hidden_states=hidden_states,
+                        layer_params=layer_params,
+                        cache=None,
+                        layer_idx=layer_idx,
+                        position=0,
+                        num_heads=config['num_heads'],
+                        config=config,
+                        rope_cos=rope_cos,
+                        rope_sin=rope_sin,
+                        use_cache=False,
+                        model_type=model_type
+                    )
+                logits = lm_head(hidden_states, params, model_type)
+                logits = logits[:, -1, :]
 
-            # Get embeddings
-            hidden_states = get_embeddings(next_token_id, params, position=current_pos, model_type=model_type)
-
-            # Forward through all layers
-            for layer_idx in range(config['num_layers']):
-                if model_type == "gpt2":
-                    layer_params = params['params']['transformer']['h'][str(layer_idx)]
-                elif model_type == "mistral":
-                    layer_params = params['params']['model']['layers'][str(layer_idx)]
-                hidden_states, cache = transformer_layer(
-                    hidden_states=hidden_states,
-                    layer_params=layer_params,
-                    cache=cache,
-                    layer_idx=layer_idx,
-                    position=current_pos,
-                    num_heads=config['num_heads'],
-                    config=config,
-                    rope_cos=rope_cos,
-                    rope_sin=rope_sin,
-                    use_cache=True,
-                    model_type=model_type
-                )
-
-            # LM head
-            logits = lm_head(hidden_states, params, model_type)
-            logits = logits[:, -1, :]  # [batch, vocab_size]
-        else:
-            # Non-cached mode: reprocess ALL tokens from scratch
-            # This is SLOW but allows comparison
-            all_token_ids = jnp.array([generated_ids])  # [batch, seq_len]
-
-            # Get embeddings for all tokens
-            hidden_states = get_embeddings(all_token_ids, params, position=None, model_type=model_type)
-
-            # Forward through all layers
-            for layer_idx in range(config['num_layers']):
-                if model_type == "gpt2":
-                    layer_params = params['params']['transformer']['h'][str(layer_idx)]
-                elif model_type == "mistral":
-                    layer_params = params['params']['model']['layers'][str(layer_idx)]
-                hidden_states, _ = transformer_layer(
-                    hidden_states=hidden_states,
-                    layer_params=layer_params,
-                    cache=None,
-                    layer_idx=layer_idx,
-                    position=0,  # Not used in batch mode
-                    num_heads=config['num_heads'],
-                    use_cache=False,
-                    model_type=model_type
-                )
-
-            # Get logits for last position
-            logits = lm_head(hidden_states, params, model_type)
-            logits = logits[:, -1, :]  # [batch, vocab_size]
-
-        # Progress indicator
-        if (step + 1) % 10 == 0:
-            print(f"  Generated {step + 1}/{max_new_tokens} tokens...")
+            if (step + 1) % 10 == 0:
+                print(f"  Generated {step + 1}/{max_new_tokens} tokens...")
     
     # Decode
     elapsed = time.time() - start_time

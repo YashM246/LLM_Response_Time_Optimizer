@@ -1,6 +1,37 @@
 # LLM Response Time Optimizer - Execution Plan (2-3 Weeks)
 
-## 🎯 CURRENT PROGRESS (Updated: 2025-01-09)
+## 🎯 CURRENT PROGRESS (Updated: 2026-02-18)
+
+---
+
+### **Phase 5: Mistral-7B Integration - IN PROGRESS 🔄**
+
+**Status:** Core generation working. `lax.scan` decode optimization in progress.
+
+**Phase 5 Results So Far (Mistral-7B-Instruct-v0.2, A100-40GB):**
+| Metric | Value |
+|--------|-------|
+| Average JAX latency | 10.88s / 50 tokens |
+| Average PyTorch latency | 24.68s / 50 tokens |
+| Average speedup | 2.27x |
+| Average tokens/sec | 4.60 tok/s |
+
+**Why these numbers differ from the GPT-2 16.32x result — IMPORTANT:**
+
+The GPT-2 16.32x speedup compared **our uncached JAX** vs **our cached JAX** — i.e., quadratic
+recomputation (O(n²)) vs linear KV-cache (O(n)). Eliminating ~99% of redundant computation
+naturally gives a large multiplier.
+
+The Mistral 2.27x compares **our cached JAX** vs **PyTorch `generate()`**, which ALREADY uses
+KV cache internally. Both sides are O(n). We are competing on JIT compilation efficiency and
+memory layout, not on eliminating quadratic work. This is a fundamentally harder comparison.
+
+**Current bottleneck:** Python-level decode loop. Each of 50 decode steps dispatches ~10 JAX ops
+per layer × 32 layers = ~16,000 Python→JAX round trips. Switching to `jax.lax.scan` traces the
+entire loop into one XLA program (1 dispatch), eliminating this overhead and enabling cross-step
+XLA optimization.
+
+---
 
 ### **Phase 4: KV-Cache + JIT Optimization - COMPLETED ✅**
 
