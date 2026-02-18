@@ -124,7 +124,7 @@ def rms_norm(x: jnp.ndarray, weight:jnp.ndarray, eps:float= 1e-6)-> jnp.ndarray:
 #   RoPE (Rotary Position Embeddings)
 ##########################################
 
-@partial(jax.jit, static_argnums=(1,2))
+@partial(jax.jit, static_argnums=(0,1,2))
 def precompute_rope_frequencies(head_dim:int, max_seq_len:int, theta:float= 10000.0) -> Tuple[jnp.ndarray, jnp.ndarray]:
     #
     # Precompute rotary position embedding frequencies
