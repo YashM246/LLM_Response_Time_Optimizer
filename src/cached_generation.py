@@ -555,6 +555,11 @@ def get_embeddings(input_ids: jnp.ndarray,
         
         embeddings = token_emb + pos_emb
         return embeddings
+    
+    elif model_type == "mistral":
+        # Mistral has no learned positional embeddings (RoPE handles positions)
+        token_emb = params['params']['model']['embed_tokens']['embedding']['input_ids']
+        return token_emb
 
 @jax.jit
 def layer_norm(x: jnp.ndarray,
