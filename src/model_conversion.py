@@ -41,7 +41,7 @@ def load_pytorch_model(model_type:str = "gpt2"):
     
     elif model_type=="mistral":
         print("Loading Mistral-7B model...")
-        model_name = "mistralai/Mistral-7B-v0.1"
+        model_name = "mistralai/Mistral-7B-Instruct-v0.2"
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         model = AutoModelForCausalLM.from_pretrained(
             model_name,

@@ -350,6 +350,68 @@ def compute_qkv_mistral(hidden_states: jnp.ndarray,
 
     return Q, K, V
 
+def mistral_prefill_layer(hidden_states: jnp.ndarray,
+                          layer_params: dict,
+                          cache: dict,
+                          layer_idx: int,
+                          rope_cos: jnp.ndarray,
+                          rope_sin: jnp.ndarray,
+                          num_heads: int,
+                          num_kv_heads: int) -> Tuple[jnp.ndarray, dict]:
+    # Process all prompt tokens in one forward pass (batch prefill)
+    # Populates the KV cache for all prompt positions simultaneously
+    # Much faster than token-by-token prefill for long prompts
+
+    batch_size, seq_len, hidden_dim = hidden_states.shape
+    head_dim = hidden_dim // num_heads
+
+    # 1) Pre-attention RMS Norm
+    normed = rms_norm(hidden_states, layer_params['input_layernorm']["kernel"])
+
+    # 2) Compute Q, K, V for all prompt tokens at once
+    position_ids = jnp.arange(seq_len).reshape(1, seq_len)
+    Q, K, V = compute_qkv_mistral(
+        normed,
+        layer_params['self_attn']['q_proj']['kernel'],
+        layer_params['self_attn']['k_proj']['kernel'],
+        layer_params['self_attn']['v_proj']['kernel'],
+        num_heads,
+        num_kv_heads,
+        position_ids,
+        rope_cos,
+        rope_sin
+    )
+
+    # 3) Write all prompt K, V into cache in one slice operation
+    current_keys = cache[layer_idx]['key']
+    current_values = cache[layer_idx]['value']
+    updated_keys = jax.lax.dynamic_update_slice(current_keys, K.astype(current_keys.dtype), (0, 0, 0, 0))
+    updated_values = jax.lax.dynamic_update_slice(current_values, V.astype(current_values.dtype), (0, 0, 0, 0))
+    new_cache = dict(cache)
+    new_cache[layer_idx] = {"key": updated_keys, "value": updated_values}
+    cache = new_cache
+
+    # 4) Expand KV Heads to match Q heads for GQA
+    n_rep = num_heads // num_kv_heads
+    K_full = repeat_kv(K, n_rep)
+    V_full = repeat_kv(V, n_rep)
+
+    # 5) Attention with causal mask over all prompt tokens
+    scores = jnp.matmul(Q, jnp.transpose(K_full, (0, 1, 3, 2))) / jnp.sqrt(head_dim)
+    scores = scores + causal_mask(seq_len)
+    attn_w = jax.nn.softmax(scores, axis=-1)
+    attn_output = merge_heads(jnp.matmul(attn_w, V_full))
+
+    # 6) Output projection + residual
+    attn_output = attn_output @ layer_params['self_attn']['o_proj']['kernel']
+    hidden_states = hidden_states + attn_output
+
+    # 7) Post-attention RMSNorm + MLP + Residual
+    normed = rms_norm(hidden_states, layer_params['post_attention_layernorm']['kernel'])
+    output = hidden_states + mlp(normed, layer_params['mlp'], 'mistral')
+
+    return output, cache
+
 
 @partial(jax.jit, static_argnums=(0,))
 def causal_mask(seq_len:int)-> jnp.ndarray:
@@ -948,17 +1010,35 @@ def generate_text_with_cache(params: dict,
     # PHASE 1: Prefill (process prompt)
     print("\nPrefill phase (processing prompt)...")
 
-    if use_cache:
-        # Token-by-token prefill with cache
+    if model_type == "mistral" and use_cache:
+        # Batch prefill: all prompt tokens in one forward pass
+        # Populates the KV cache for all prompt positions simultaneously
+        print("Mode: Batch prefill (all tokens at once)")
+        hidden_states = get_embeddings(input_ids, params, position=None, model_type=model_type)
+
+        for layer_idx in range(config['num_layers']):
+            layer_params = params['params']['model']['layers'][str(layer_idx)]
+            hidden_states, cache = mistral_prefill_layer(
+                hidden_states=hidden_states,
+                layer_params=layer_params,
+                cache=cache,
+                layer_idx=layer_idx,
+                rope_cos=rope_cos,
+                rope_sin=rope_sin,
+                num_heads=config['num_heads'],
+                num_kv_heads=config['num_kv_heads']
+            )
+
+        logits = lm_head(hidden_states, params, model_type)
+        logits = logits[:, -1, :]  # logits for the last prompt token
+
+    elif use_cache:
+        # GPT-2: token-by-token prefill with cache
         print("Mode: Token-by-token with cache")
         for pos in range(prompt_len):
-            # Get single token
             token_id = input_ids[:, pos:pos+1]  # [batch, 1]
-
-            # Get embeddings
             hidden_states = get_embeddings(token_id, params, position=pos, model_type=model_type)
 
-            # Forward through all layers
             for layer_idx in range(config['num_layers']):
                 if model_type == "gpt2":
                     layer_params = params['params']['transformer']['h'][str(layer_idx)]
@@ -978,10 +1058,10 @@ def generate_text_with_cache(params: dict,
                     model_type=model_type
                 )
 
-            # LM head (only need logits on last prefill token)
             if pos == prompt_len - 1:
                 logits = lm_head(hidden_states, params, model_type)
-                logits = logits[:, -1, :]  # [batch, vocab_size]
+                logits = logits[:, -1, :]
+
     else:
         # Batch prefill (all tokens at once) - no cache
         print("Mode: Batch processing (all tokens at once)")
