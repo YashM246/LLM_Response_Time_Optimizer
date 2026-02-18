@@ -17,7 +17,6 @@ import jax
 import jax.numpy as jnp
 from transformers import (
     AutoModelForCausalLM,
-    FlaxMistralForCausalLM,
     AutoTokenizer
 )
 from typing import Dict, Any
