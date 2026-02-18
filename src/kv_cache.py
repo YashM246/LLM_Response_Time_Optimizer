@@ -156,6 +156,10 @@ def update_cache(cache, layer_idx, new_keys, new_values, cache_position):
     current_keys = cache[layer_idx]['key']
     current_values = cache[layer_idx]['value']
 
+    # Cast new tensors to match the cache dtype to avoid dtype mismatch errors
+    new_keys = new_keys.astype(current_keys.dtype)
+    new_values = new_values.astype(current_values.dtype)
+
     updated_keys = jax.lax.dynamic_update_slice(
         current_keys,
         new_keys,
