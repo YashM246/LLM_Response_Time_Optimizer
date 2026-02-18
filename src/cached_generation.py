@@ -65,6 +65,7 @@ from functools import partial
 #####################################
 
 GPT2_CONFIG = {
+    'model_type': 'gpt2',
     'num_layers': 12,
     'num_heads': 12,
     'num_kv_heads': 12,  # Same as num_heads for standard MHA
@@ -80,6 +81,7 @@ GPT2_CONFIG = {
 }
 
 MISTRAL_CONFIG = {
+    'model_type': 'mistral',
     'num_layers': 32,
     'num_heads': 32,
     'num_kv_heads': 8,  # GQA: fewer KV heads than Q heads
