@@ -558,7 +558,7 @@ def get_embeddings(input_ids: jnp.ndarray,
     
     elif model_type == "mistral":
         # Mistral has no learned positional embeddings (RoPE handles positions)
-        token_emb = params['params']['model']['embed_tokens']['embedding']['input_ids']
+        token_emb = params['params']['model']['embed_tokens']['embedding'][input_ids]
         return token_emb
 
 @jax.jit
@@ -958,7 +958,10 @@ def generate_text_with_cache(params: dict,
 
             # Forward through all layers
             for layer_idx in range(config['num_layers']):
-                layer_params = params['params']['transformer']['h'][str(layer_idx)]
+                if model_type == "gpt2":
+                    layer_params = params['params']['transformer']['h'][str(layer_idx)]
+                elif model_type == "mistral":
+                    layer_params = params['params']['model']['layers'][str(layer_idx)]
                 hidden_states, cache = transformer_layer(
                     hidden_states=hidden_states,
                     layer_params=layer_params,
@@ -987,7 +990,10 @@ def generate_text_with_cache(params: dict,
 
         # Forward through all layers
         for layer_idx in range(config['num_layers']):
-            layer_params = params['params']['transformer']['h'][str(layer_idx)]
+            if model_type == "gpt2":
+                layer_params = params['params']['transformer']['h'][str(layer_idx)]
+            elif model_type == "mistral":
+                layer_params = params['params']['model']['layers'][str(layer_idx)]
             hidden_states, _ = transformer_layer(
                 hidden_states=hidden_states,
                 layer_params=layer_params,
@@ -1038,7 +1044,10 @@ def generate_text_with_cache(params: dict,
 
             # Forward through all layers
             for layer_idx in range(config['num_layers']):
-                layer_params = params['params']['transformer']['h'][str(layer_idx)]
+                if model_type == "gpt2":
+                    layer_params = params['params']['transformer']['h'][str(layer_idx)]
+                elif model_type == "mistral":
+                    layer_params = params['params']['model']['layers'][str(layer_idx)]
                 hidden_states, cache = transformer_layer(
                     hidden_states=hidden_states,
                     layer_params=layer_params,
@@ -1066,7 +1075,10 @@ def generate_text_with_cache(params: dict,
 
             # Forward through all layers
             for layer_idx in range(config['num_layers']):
-                layer_params = params['params']['transformer']['h'][str(layer_idx)]
+                if model_type == "gpt2":
+                    layer_params = params['params']['transformer']['h'][str(layer_idx)]
+                elif model_type == "mistral":
+                    layer_params = params['params']['model']['layers'][str(layer_idx)]
                 hidden_states, _ = transformer_layer(
                     hidden_states=hidden_states,
                     layer_params=layer_params,
