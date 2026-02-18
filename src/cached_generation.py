@@ -803,8 +803,17 @@ def lm_head(hidden_states: jnp.ndarray,
         wte = params['params']['transformer']['wte']['embedding']  # [vocab_size, hidden_dim]
         logits = hidden_states @ wte.T  # [batch, seq_len, vocab_size]
         
+    elif model_type == "mistral":
+        # Final RMS Norm
+        norm_weight = params['params']['model']['norm']['kernel']
+        hidden_states = rms_norm(hidden_states, norm_weight)
+
+        # Project to Vocabulary
+        lm_head_weight = params['params']['lm_head']['kernel']
+        logits = hidden_states @ lm_head_weight
+    
     else:
-        raise NotImplementedError("Mistral LM head not yet implemented")
+        raise ValueError(f"Unknown model_type: {model_type}")
     
     return logits
 
